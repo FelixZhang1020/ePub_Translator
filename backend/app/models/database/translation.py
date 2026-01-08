@@ -2,34 +2,22 @@
 
 import uuid
 from datetime import datetime
-from enum import Enum
 from typing import TYPE_CHECKING, Optional, List
 
 from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database.base import Base
+from app.models.database.enums import TranslationMode, TaskStatus
+from app.models.database.mixins import ProgressTrackingMixin
+
+# Re-export for backwards compatibility
+__all__ = ["Translation", "TranslationTask", "TranslationMode", "TaskStatus"]
 
 if TYPE_CHECKING:
     from app.models.database.project import Project
     from app.models.database.paragraph import Paragraph
-    from app.models.database.translation_reasoning import TranslationReasoning
     from app.models.database.translation_conversation import TranslationConversation
-
-
-class TranslationMode(str, Enum):
-    """Translation mode enum."""
-    AUTHOR_BASED = "author_based"
-    OPTIMIZATION = "optimization"
-
-
-class TaskStatus(str, Enum):
-    """Translation task status enum."""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class Translation(Base):
@@ -66,17 +54,13 @@ class Translation(Base):
     paragraph: Mapped["Paragraph"] = relationship(
         "Paragraph", back_populates="translations"
     )
-    reasoning: Mapped[Optional["TranslationReasoning"]] = relationship(
-        "TranslationReasoning", back_populates="translation", uselist=False,
-        cascade="all, delete-orphan"
-    )
     conversation: Mapped[Optional["TranslationConversation"]] = relationship(
         "TranslationConversation", back_populates="translation", uselist=False,
         cascade="all, delete-orphan"
     )
 
 
-class TranslationTask(Base):
+class TranslationTask(Base, ProgressTrackingMixin):
     """Translation task for tracking progress and enabling pause/resume."""
 
     __tablename__ = "translation_tasks"
@@ -103,8 +87,8 @@ class TranslationTask(Base):
 
     # Configuration
     author_context: Mapped[Optional[dict]] = mapped_column(JSON)
-    custom_prompts: Mapped[Optional[list]] = mapped_column(JSON)
     selected_chapters: Mapped[Optional[list]] = mapped_column(JSON)  # None = all
+    # NOTE: custom_prompts removed - prompts are now loaded from files via PromptLoader
 
     # Error handling
     error_message: Mapped[Optional[str]] = mapped_column(Text)
@@ -120,8 +104,3 @@ class TranslationTask(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="tasks")
-
-    def update_progress(self):
-        """Update progress percentage based on completed paragraphs."""
-        if self.total_paragraphs > 0:
-            self.progress = self.completed_paragraphs / self.total_paragraphs

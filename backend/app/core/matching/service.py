@@ -14,7 +14,7 @@ from app.config import settings
 from app.models.database import Project, ReferenceEPUB, ParagraphMatch
 from app.models.database.chapter import Chapter
 from app.models.database.paragraph import Paragraph
-from app.core.epub.parser import EPUBParser
+from app.core.epub import EPUBParser
 from app.core.matching.smart_matcher import SmartMatcher
 
 

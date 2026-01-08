@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useParams, useOutletContext } from 'react-router-dom'
+import { useParams, useOutletContext, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload,
@@ -18,8 +18,10 @@ import {
   PanelRightClose,
   Search,
   RefreshCw,
+  ArrowRight,
+  CheckCircle,
 } from 'lucide-react'
-import { api, TocItem, ChapterImage } from '../../services/api/client'
+import { api, ChapterImage } from '../../services/api/client'
 import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
@@ -28,29 +30,22 @@ import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
 import { ResizeHandle } from '../../components/common/ResizeHandle'
 import { PreviewModal } from '../../components/preview/PreviewModal'
 import { ReasoningChatModal } from '../../components/translation/ReasoningChatModal'
-
-// Helper function to flatten TOC into ordered chapter IDs for navigation
-function flattenTocToChapterIds(toc: TocItem[]): string[] {
-  const result: string[] = []
-  for (const item of toc) {
-    if (item.chapter_id) {
-      result.push(item.chapter_id)
-    }
-    if (item.children && item.children.length > 0) {
-      result.push(...flattenTocToChapterIds(item.children))
-    }
-  }
-  return result
-}
+import {
+  useOrderedChapterIds,
+  useChapterNavigation,
+  usePanelResize,
+} from '../../utils/workflow'
 
 interface WorkflowContext {
   project: {
     id: string
     name: string
+    author?: string | null
     has_reference_epub?: boolean
   } | null
   workflowStatus: {
     has_reference_epub: boolean
+    translation_completed: boolean
     translation_progress?: {
       has_task: boolean
       task_id?: string
@@ -66,36 +61,14 @@ interface WorkflowContext {
 export function TranslateWorkflowPage() {
   const { t } = useTranslation()
   const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const context = useOutletContext<WorkflowContext>()
   const fontSize = useAppStore((state) => state.fontSize)
   const fontClasses = fontSizeClasses[fontSize]
-  const panelWidths = useAppStore((state) => state.panelWidths)
-  const setPanelWidth = useAppStore((state) => state.setPanelWidth)
 
-  // Panel width constraints
-  const MIN_CHAPTER_LIST_WIDTH = 120
-  const MAX_CHAPTER_LIST_WIDTH = 400
-  const MIN_REFERENCE_PANEL_WIDTH = 200
-  const MAX_REFERENCE_PANEL_WIDTH = 500
-
-  // Resize handlers
-  const handleChapterListResize = useCallback((delta: number) => {
-    const newWidth = Math.max(
-      MIN_CHAPTER_LIST_WIDTH,
-      Math.min(MAX_CHAPTER_LIST_WIDTH, panelWidths.chapterList + delta)
-    )
-    setPanelWidth('chapterList', newWidth)
-  }, [panelWidths.chapterList, setPanelWidth])
-
-  const handleReferencePanelResize = useCallback((delta: number) => {
-    // For reference panel, negative delta means making it wider (dragging left)
-    const newWidth = Math.max(
-      MIN_REFERENCE_PANEL_WIDTH,
-      Math.min(MAX_REFERENCE_PANEL_WIDTH, panelWidths.referencePanel - delta)
-    )
-    setPanelWidth('referencePanel', newWidth)
-  }, [panelWidths.referencePanel, setPanelWidth])
+  // Panel resize functionality from shared hook
+  const { panelWidths, handleChapterListResize, handleReferencePanelResize } = usePanelResize()
 
   // State
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null)
@@ -111,7 +84,6 @@ export function TranslateWorkflowPage() {
 
   // Prompt preview state
   const [showTranslationPromptPreview, setShowTranslationPromptPreview] = useState(false)
-  const [showReasoningPromptPreview, setShowReasoningPromptPreview] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
 
   // Reference panel state
@@ -134,6 +106,8 @@ export function TranslateWorkflowPage() {
   const translationProgress = context?.workflowStatus?.translation_progress
   const isTranslating = translationProgress?.status === 'processing' || translationProgress?.status === 'pending'
   const translationStatus = translationProgress?.status
+  const translationCompleted = context?.workflowStatus?.translation_completed ?? false
+  const hasTranslationContent = (translationProgress?.completed_paragraphs ?? 0) > 0
 
   // Track previous translation status to detect completion
   const [prevTranslationStatus, setPrevTranslationStatus] = useState<string | undefined>(undefined)
@@ -160,18 +134,26 @@ export function TranslateWorkflowPage() {
   })
 
   // Create ordered list of chapter IDs from TOC for navigation
-  const orderedChapterIds = useMemo(() => {
-    if (toc && toc.length > 0) {
-      return flattenTocToChapterIds(toc)
-    }
-    return chapters?.map(c => c.id) || []
-  }, [toc, chapters])
+  const orderedChapterIds = useOrderedChapterIds(toc, chapters)
+
+  // Chapter navigation
+  const { canGoPrev, canGoNext, goToPrevChapter, goToNextChapter } =
+    useChapterNavigation(orderedChapterIds, selectedChapter, setSelectedChapter)
 
   // Extract prompt preview variables from analysis data
   const promptPreviewVariables = useMemo(() => {
     const rawAnalysis = analysisData?.raw_analysis as Record<string, unknown> | null
+
+    // Project info from context - use actual project data, not analysis
+    const projectInfo = {
+      title: context?.project?.name || '',
+      author: context?.project?.author || '',
+      author_background: (rawAnalysis?.author_biography as string) || '',
+    }
+
     if (!rawAnalysis) {
       return {
+        project: projectInfo,
         source_text: '(Source text will be provided during translation)',
         analysis_text: '',
         author_biography: '',
@@ -200,6 +182,7 @@ export function TranslateWorkflowPage() {
     const guidelinesText = guidelines ? guidelines.join('\n') : ''
 
     return {
+      project: projectInfo,
       source_text: '(Source text will be provided during translation)',
       analysis_text: JSON.stringify(rawAnalysis, null, 2),
       author_biography: (rawAnalysis.author_biography as string) || '',
@@ -211,7 +194,7 @@ export function TranslateWorkflowPage() {
       translation_principles: principlesText,
       custom_guidelines: guidelinesText,
     }
-  }, [analysisData])
+  }, [analysisData, context?.project])
 
   // Fetch reference EPUB info
   const { data: referenceEpub } = useQuery({
@@ -365,6 +348,15 @@ export function TranslateWorkflowPage() {
     },
   })
 
+  // Confirm translation mutation
+  const confirmTranslationMutation = useMutation({
+    mutationFn: () => api.confirmTranslation(projectId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
+      context?.refetchWorkflow()
+    },
+  })
+
   // Handler for translation prompt confirmation
   const handleTranslationPromptConfirm = (systemPrompt?: string, userPrompt?: string) => {
     setShowTranslationPromptPreview(false)
@@ -372,11 +364,6 @@ export function TranslateWorkflowPage() {
       customSystemPrompt: systemPrompt,
       customUserPrompt: userPrompt,
     })
-  }
-
-  // Handler for reasoning prompt confirmation (not currently used - reasoning triggered directly)
-  const handleReasoningPromptConfirm = () => {
-    setShowReasoningPromptPreview(false)
   }
 
   // Start translation directly without prompt preview
@@ -438,7 +425,7 @@ export function TranslateWorkflowPage() {
     })
   }
 
-  // Handle reasoning request - opens chat modal
+  // Handle translation discussion - opens chat modal
   const handleRequestReasoning = (paragraphId: string, translationId: string | undefined, originalText: string, translatedText: string) => {
     if (!translationId) return
     setShowReasoningChat({
@@ -449,15 +436,10 @@ export function TranslateWorkflowPage() {
     })
   }
 
-  // Navigation helpers
-  const currentChapterIndex = orderedChapterIds.findIndex((id) => id === selectedChapter)
-  const canGoPrev = currentChapterIndex > 0
-  const canGoNext = currentChapterIndex >= 0 && currentChapterIndex < orderedChapterIds.length - 1
-
   return (
     <div className={`h-full flex flex-col ${fontClasses.base}`}>
-      {/* Header with controls - compact */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
+      {/* Action Bar - unified format */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2 lg:gap-4">
           {/* Reference EPUB status */}
           {hasReference && referenceEpub ? (
@@ -508,7 +490,7 @@ export function TranslateWorkflowPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 lg:gap-3">
+        <div className="flex items-center gap-2 lg:gap-3 ml-auto">
           {/* LLM Config selector */}
           <LLMConfigSelector />
 
@@ -543,6 +525,37 @@ export function TranslateWorkflowPage() {
             <BookOpen className="w-4 h-4" />
             <span className="hidden lg:inline">{t('common.preview')}</span>
           </button>
+
+          {/* Complete Translation button */}
+          <button
+            onClick={() => confirmTranslationMutation.mutate()}
+            disabled={!hasTranslationContent || confirmTranslationMutation.isPending || translationCompleted}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${fontClasses.button} ${
+              translationCompleted
+                ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default'
+                : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed'
+            }`}
+          >
+            {confirmTranslationMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : translationCompleted ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            {translationCompleted ? t('translate.translationConfirmed') : t('translate.completeTranslation')}
+          </button>
+
+          {/* Continue to Proofreading button - only shown after translation is confirmed */}
+          {translationCompleted && (
+            <button
+              onClick={() => navigate(`/project/${projectId}/proofread`)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${fontClasses.button}`}
+            >
+              {t('workflow.continueToProofreading')}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -600,11 +613,7 @@ export function TranslateWorkflowPage() {
           {/* Chapter navigation */}
           <div className="flex items-center justify-between mb-2 px-1">
             <button
-              onClick={() => {
-                if (canGoPrev) {
-                  setSelectedChapter(orderedChapterIds[currentChapterIndex - 1])
-                }
-              }}
+              onClick={goToPrevChapter}
               disabled={!canGoPrev}
               className="flex items-center gap-0.5 px-1.5 py-0.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 disabled:text-gray-300 dark:disabled:text-gray-600 text-xs"
             >
@@ -615,11 +624,7 @@ export function TranslateWorkflowPage() {
               {chapterContent?.title || t('preview.chapterNumber', { number: String(chapterContent?.chapter_number) })}
             </span>
             <button
-              onClick={() => {
-                if (canGoNext) {
-                  setSelectedChapter(orderedChapterIds[currentChapterIndex + 1])
-                }
-              }}
+              onClick={goToNextChapter}
               disabled={!canGoNext}
               className="flex items-center gap-0.5 px-1.5 py-0.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 disabled:text-gray-300 dark:disabled:text-gray-600 text-xs"
             >
@@ -941,22 +946,10 @@ export function TranslateWorkflowPage() {
         isOpen={showTranslationPromptPreview}
         onClose={() => setShowTranslationPromptPreview(false)}
         promptType="translation"
+        projectId={projectId}
         variables={promptPreviewVariables}
         onConfirm={handleTranslationPromptConfirm}
         isLoading={startTranslationMutation.isPending}
-      />
-
-      {/* Reasoning Prompt Preview Modal (legacy - not currently triggered) */}
-      <PromptPreviewModal
-        isOpen={showReasoningPromptPreview}
-        onClose={() => setShowReasoningPromptPreview(false)}
-        promptType="reasoning"
-        variables={{
-          original_text: '(Original text will be provided)',
-          translated_text: '(Translated text will be provided)',
-        }}
-        onConfirm={handleReasoningPromptConfirm}
-        isLoading={false}
       />
     </div>
   )

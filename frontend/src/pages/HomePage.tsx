@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Plus, BookOpen, Clock, CheckCircle, AlertCircle, Trash2 } from 'lucide-react'
+import { Plus, BookOpen, Clock, CheckCircle, AlertCircle, Trash2, Star } from 'lucide-react'
 import { api } from '../services/api/client'
 import { useTranslation, useAppStore, fontSizeClasses } from '../stores/appStore'
 
@@ -22,6 +22,19 @@ export function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
+
+  const favoriteMutation = useMutation({
+    mutationFn: api.toggleFavorite,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+
+  const handleToggleFavorite = (e: React.MouseEvent, projectId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    favoriteMutation.mutate(projectId)
+  }
 
   const handleDelete = (e: React.MouseEvent, projectId: string, projectName: string) => {
     e.preventDefault()
@@ -96,6 +109,17 @@ export function HomePage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => handleToggleFavorite(e, project.id)}
+                    className={`p-1 rounded transition-colors ${
+                      project.is_favorite
+                        ? 'text-yellow-500 hover:text-yellow-600'
+                        : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
+                    }`}
+                    title={t('home.favorite')}
+                  >
+                    <Star className={`w-4 h-4 ${project.is_favorite ? 'fill-current' : ''}`} />
+                  </button>
                   {getStatusIcon(project.status)}
                   <button
                     onClick={(e) => handleDelete(e, project.id, project.name)}

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useParams, useOutletContext } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, useOutletContext, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Play,
@@ -22,7 +22,7 @@ import {
   MessageSquare,
   BookOpen,
 } from 'lucide-react'
-import { api, ProofreadingSuggestion, TocItem } from '../../services/api/client'
+import { api, ProofreadingSuggestion } from '../../services/api/client'
 import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
@@ -30,20 +30,11 @@ import { TreeChapterList } from '../../components/common/TreeChapterList'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
 import { ResizeHandle } from '../../components/common/ResizeHandle'
 import { PreviewModal } from '../../components/preview/PreviewModal'
-
-// Helper function to flatten TOC into ordered chapter IDs
-function flattenTocToChapterIds(toc: TocItem[]): string[] {
-  const result: string[] = []
-  for (const item of toc) {
-    if (item.chapter_id) {
-      result.push(item.chapter_id)
-    }
-    if (item.children && item.children.length > 0) {
-      result.push(...flattenTocToChapterIds(item.children))
-    }
-  }
-  return result
-}
+import {
+  useOrderedChapterIds,
+  useChapterNavigation,
+  usePanelResize,
+} from '../../utils/workflow'
 
 interface WorkflowContext {
   project: {
@@ -68,33 +59,22 @@ type ViewMode = 'llm-suggestions' | 'all-translations'
 export function ProofreadPage() {
   const { t } = useTranslation()
   const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const context = useOutletContext<WorkflowContext>()
 
-  // App store for font size, panel widths
+  // App store for font size
   const fontSize = useAppStore((state) => state.fontSize)
   const fontClasses = fontSizeClasses[fontSize]
-  const panelWidths = useAppStore((state) => state.panelWidths)
-  const setPanelWidth = useAppStore((state) => state.setPanelWidth)
+
+  // Panel resize functionality from shared hook
+  const { panelWidths, handleChapterListResize } = usePanelResize()
 
   // Settings store for LLM config
   const { getActiveConfig, getActiveConfigId } = useSettingsStore()
   const activeConfig = getActiveConfig()
   const configId = getActiveConfigId()
   const hasLLMConfig = !!(activeConfig && activeConfig.hasApiKey)
-
-  // Panel width constraints
-  const MIN_CHAPTER_LIST_WIDTH = 120
-  const MAX_CHAPTER_LIST_WIDTH = 400
-
-  // Resize handler
-  const handleChapterListResize = useCallback((delta: number) => {
-    const newWidth = Math.max(
-      MIN_CHAPTER_LIST_WIDTH,
-      Math.min(MAX_CHAPTER_LIST_WIDTH, panelWidths.chapterList + delta)
-    )
-    setPanelWidth('chapterList', newWidth)
-  }, [panelWidths.chapterList, setPanelWidth])
 
   // View mode state
   const [viewMode, setViewMode] = useState<ViewMode>('llm-suggestions')
@@ -133,12 +113,11 @@ export function ProofreadPage() {
   })
 
   // Create ordered list of chapter IDs
-  const orderedChapterIds = useMemo(() => {
-    if (toc && toc.length > 0) {
-      return flattenTocToChapterIds(toc)
-    }
-    return chapters?.map(c => c.id) || []
-  }, [toc, chapters])
+  const orderedChapterIds = useOrderedChapterIds(toc, chapters)
+
+  // Chapter navigation
+  const { canGoPrev, canGoNext, goToPrevChapter, goToNextChapter } =
+    useChapterNavigation(orderedChapterIds, selectedChapter, setSelectedChapter)
 
   // Auto-select first chapter when viewing all translations
   useEffect(() => {
@@ -374,17 +353,12 @@ export function ProofreadPage() {
     return model?.display_name || modelId
   }
 
-  // Chapter navigation
-  const currentChapterIndex = orderedChapterIds.findIndex(id => id === selectedChapter)
-  const canGoPrev = currentChapterIndex > 0
-  const canGoNext = currentChapterIndex >= 0 && currentChapterIndex < orderedChapterIds.length - 1
-
   const paragraphs = chapterContent?.paragraphs || []
 
   return (
     <div className={`h-full flex flex-col ${fontClasses.base}`}>
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
+      {/* Action Bar - unified format */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-3">
           <h2 className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>{t('proofreading.title')}</h2>
           {currentSession && (
@@ -425,7 +399,7 @@ export function ProofreadPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 ml-auto">
           {/* Session selector */}
           {sessions && sessions.length > 1 && (
             <select
@@ -476,6 +450,15 @@ export function ProofreadPage() {
           >
             <BookOpen className="w-4 h-4" />
             <span className="hidden lg:inline">{t('common.preview')}</span>
+          </button>
+
+          {/* Continue to Export button */}
+          <button
+            onClick={() => navigate(`/project/${projectId}/export`)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 ${fontClasses.button}`}
+          >
+            {t('workflow.continueToExport')}
+            <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -871,11 +854,7 @@ export function ProofreadPage() {
               {/* Chapter navigation */}
               <div className="flex items-center justify-between mb-2 px-1">
                 <button
-                  onClick={() => {
-                    if (canGoPrev) {
-                      setSelectedChapter(orderedChapterIds[currentChapterIndex - 1])
-                    }
-                  }}
+                  onClick={goToPrevChapter}
                   disabled={!canGoPrev}
                   className={`flex items-center gap-0.5 px-1.5 py-0.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 disabled:text-gray-300 dark:disabled:text-gray-600 ${fontClasses.xs}`}
                 >
@@ -886,11 +865,7 @@ export function ProofreadPage() {
                   {chapterContent?.title || t('preview.chapterNumber', { number: String(chapterContent?.chapter_number) })}
                 </span>
                 <button
-                  onClick={() => {
-                    if (canGoNext) {
-                      setSelectedChapter(orderedChapterIds[currentChapterIndex + 1])
-                    }
-                  }}
+                  onClick={goToNextChapter}
                   disabled={!canGoNext}
                   className={`flex items-center gap-0.5 px-1.5 py-0.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 disabled:text-gray-300 dark:disabled:text-gray-600 ${fontClasses.xs}`}
                 >
@@ -997,6 +972,7 @@ export function ProofreadPage() {
         isOpen={showPromptPreview}
         onClose={() => setShowPromptPreview(false)}
         promptType="proofreading"
+        projectId={projectId}
         variables={{
           original_text: '(Original text will be provided during proofreading)',
           current_translation: '(Current translation will be provided)',

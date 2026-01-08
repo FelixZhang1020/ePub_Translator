@@ -65,6 +65,15 @@ export interface TranslationProgressInfo {
   total_paragraphs: number
 }
 
+// Translation progress for step indicator
+export interface TranslationProgressForStep {
+  hasTask: boolean
+  status?: string
+  progress: number
+  completedParagraphs: number
+  totalParagraphs: number
+}
+
 // Workflow step status for header display
 export interface WorkflowStepStatus {
   projectId: string
@@ -72,6 +81,7 @@ export interface WorkflowStepStatus {
   analysisCompleted: boolean
   translationCompleted: boolean
   proofreadingCompleted: boolean
+  translationProgress?: TranslationProgressForStep
 }
 
 // Panel width settings for resizable layout

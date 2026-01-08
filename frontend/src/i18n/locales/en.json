@@ -17,7 +17,8 @@
     "error": "Error",
     "show": "Show",
     "hide": "Hide",
-    "progress": "Progress"
+    "progress": "Progress",
+    "items": "items"
   },
   "app": {
     "title": "EPUB Translator"
@@ -38,7 +39,8 @@
     "unknownAuthor": "Unknown Author",
     "chapters": "chapters",
     "paragraphs": "paragraphs",
-    "confirmDelete": "Are you sure you want to delete \"{{name}}\"?"
+    "confirmDelete": "Are you sure you want to delete \"{{name}}\"?",
+    "favorite": "Toggle favorite"
   },
   "upload": {
     "title": "Upload EPUB",
@@ -205,7 +207,11 @@
     "expandContext": "Show full text",
     "collapseContext": "Collapse",
     "retranslate": "Retranslate",
-    "retranslating": "Retranslating..."
+    "retranslating": "Retranslating...",
+    "completeTranslation": "Complete Translation",
+    "translationConfirmed": "Completed",
+    "continueTranslating": "Continue Translating",
+    "resetTranslationStatus": "Reset to continue translating"
   },
   "preview": {
     "chapterList": "Chapter List",
@@ -227,7 +233,9 @@
     "translation": "Translation",
     "proofreading": "Proofreading",
     "export": "Export",
-    "continueToTranslation": "Continue to Translation"
+    "continueToTranslation": "Continue to Translation",
+    "continueToProofreading": "Continue to Proofreading",
+    "continueToExport": "Finish Proofreading"
   },
   "analysis": {
     "llmConfig": "LLM Configuration",
@@ -250,6 +258,10 @@
     "noFields": "No analysis fields available",
     "analyzing": "Analyzing Book",
     "preview": "Preview",
+    "themes": "Themes",
+    "summary": "Summary",
+    "noData": "No data",
+    "terms": "terms",
     "progress": {
       "loading": "Loading project",
       "sampling": "Sampling paragraphs",
@@ -330,7 +342,7 @@
     "userPrompt": "User Prompt",
     "variables": "Variables",
     "reset": "Reset",
-    "send": "Send",
+    "send": "Execute",
     "modified": "Modified",
     "refreshPreview": "Refresh Preview",
     "renderedPreview": "Rendered Preview",
@@ -342,7 +354,25 @@
     "viewPrompt": "View Prompt",
     "editPrompt": "Edit Prompt",
     "save": "Save",
-    "saved": "Saved"
+    "saved": "Saved",
+    "selectTemplate": "Template",
+    "defaultTemplate": "Default",
+    "builtinTemplate": "System Default",
+    "projectCustom": "Project Custom",
+    "loading": "Loading...",
+    "reformedTheologyTemplate": "Reformed Translator",
+    "projectDefault": "Project Default",
+    "globalDefault": "Global Default",
+    "hasProjectPrompt": "Project has custom prompt",
+    "usingProjectUserPrompt": "Using project-specific user prompt",
+    "usingDefaultUserPrompt": "Using default user prompt",
+    "priorityChain": "User Prompt Source",
+    "fromTemplate": "From Template",
+    "available": "Available",
+    "notConfigured": "Not Configured",
+    "systemModified": "System Modified",
+    "userModified": "User Modified",
+    "projectUserPrompt": "Project User Prompt"
   },
   "promptManagement": {
     "title": "Prompt Management",
@@ -357,6 +387,10 @@
     "deleteTemplate": "Delete Template",
     "templateName": "Template Name",
     "templateNamePlaceholder": "e.g., Translation Expert",
+    "displayName": "Display Name",
+    "displayNamePlaceholder": "e.g., My Translation Style",
+    "fileName": "File Name",
+    "fileNameHint": "Lowercase letters, numbers, and hyphens only.",
     "description": "Description",
     "descriptionPlaceholder": "Brief description of this template...",
     "category": "Category",
@@ -379,6 +413,7 @@
     "inheritFromTemplate": "Inherit from template",
     "confirmDelete": "Are you sure you want to delete this template?",
     "cannotDeleteBuiltin": "Built-in templates cannot be deleted",
+    "setAsDefault": "Set as default",
     "syncFromFiles": "Sync from Files",
     "syncing": "Syncing...",
     "syncSuccess": "Templates synced successfully",
@@ -414,6 +449,8 @@
       "json": "JSON"
     },
     "noVariables": "No variables defined",
-    "addFirstVariable": "Add your first custom variable"
+    "addFirstVariable": "Add your first custom variable",
+    "resetToDefault": "Reset to Default",
+    "confirmResetPrompt": "Are you sure you want to reset this prompt to the default template? Your custom changes will be lost."
   }
 }

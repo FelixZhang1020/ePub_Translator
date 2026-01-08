@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
@@ -6,8 +6,8 @@ import {
   Edit3,
   X,
   Save,
-  Star,
   Lock,
+  Star,
   RefreshCw,
   FileText,
   ChevronDown,
@@ -16,7 +16,6 @@ import {
   Languages,
   Sparkles,
   FileCheck,
-  HelpCircle,
   PanelRightOpen,
   PanelRightClose,
   Variable,
@@ -27,16 +26,15 @@ import { useTranslation, useAppStore, fontSizeClasses } from '../stores/appStore
 import { VariablePanel } from '../components/prompts/VariablePanel'
 import type { PromptStage } from '../data/variableRegistry'
 
-type PromptCategory = 'analysis' | 'translation' | 'optimization' | 'proofreading' | 'reasoning'
+type PromptCategory = 'analysis' | 'translation' | 'optimization' | 'proofreading'
 
-const CATEGORIES: PromptCategory[] = ['analysis', 'translation', 'optimization', 'proofreading', 'reasoning']
+const CATEGORIES: PromptCategory[] = ['analysis', 'translation', 'optimization', 'proofreading']
 
 const CATEGORY_ICONS: Record<PromptCategory, React.ComponentType<{ className?: string }>> = {
   analysis: BookOpen,
   translation: Languages,
   optimization: Sparkles,
   proofreading: FileCheck,
-  reasoning: HelpCircle,
 }
 
 // Template Editor Modal
@@ -49,11 +47,10 @@ function TemplateEditor({
   template: Partial<PromptTemplateDB>
   onSave: (data: {
     name: string
-    description?: string
+    display_name: string
     category: string
+    template_name: string
     system_prompt: string
-    default_user_prompt?: string
-    is_default?: boolean
   }) => void
   onCancel: () => void
   isNew?: boolean
@@ -62,26 +59,29 @@ function TemplateEditor({
   const fontSize = useAppStore((state) => state.fontSize)
   const fontClasses = fontSizeClasses[fontSize]
 
-  const [name, setName] = useState(template.name || '')
-  const [description, setDescription] = useState(template.description || '')
+  const [displayName, setDisplayName] = useState(template.display_name || '')
   const [category, setCategory] = useState<PromptCategory>(
     (template.category as PromptCategory) || 'translation'
   )
+  const [templateName, setTemplateName] = useState(template.template_name || '')
   const [systemPrompt, setSystemPrompt] = useState(template.system_prompt || '')
-  const [isDefault, setIsDefault] = useState(template.is_default || false)
   const [showVariablePanel, setShowVariablePanel] = useState(true)
 
   // Ref for textarea to support cursor position insertion
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSave = () => {
-    if (!name.trim() || !systemPrompt.trim()) return
+    if (!displayName.trim() || !systemPrompt.trim()) return
+    // For new templates, require template_name
+    if (isNew && !templateName.trim()) return
+    // For existing non-default templates, allow renaming
+    const finalTemplateName = isNew ? templateName.trim() : templateName.trim() || template.template_name || ''
     onSave({
-      name: name.trim(),
-      description: description.trim() || undefined,
+      name: displayName.trim(),
+      display_name: displayName.trim(),
       category,
+      template_name: finalTemplateName,
       system_prompt: systemPrompt,
-      is_default: isDefault,
     })
   }
 
@@ -148,14 +148,15 @@ function TemplateEditor({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={`block ${fontClasses.sm} font-medium text-gray-700 dark:text-gray-300 mb-1`}>
-                  {t('promptManagement.templateName')}
+                  {t('promptManagement.displayName')}
                 </label>
                 <input
                   type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={t('promptManagement.templateNamePlaceholder')}
-                  className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder={t('promptManagement.displayNamePlaceholder')}
+                  disabled={!isNew && template.template_name === 'default'}
+                  className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-600`}
                 />
               </div>
               <div>
@@ -165,7 +166,8 @@ function TemplateEditor({
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as PromptCategory)}
-                  className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
+                  disabled={!isNew && template.template_name === 'default'}
+                  className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-600`}
                 >
                   {CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
@@ -176,19 +178,26 @@ function TemplateEditor({
               </div>
             </div>
 
-            {/* Description */}
-            <div>
-              <label className={`block ${fontClasses.sm} font-medium text-gray-700 dark:text-gray-300 mb-1`}>
-                {t('promptManagement.description')}
-              </label>
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder={t('promptManagement.descriptionPlaceholder')}
-                className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-              />
-            </div>
+            {/* File Name - editable for new templates and non-default existing templates */}
+            {(isNew || template.template_name !== 'default') && (
+              <div>
+                <label className={`block ${fontClasses.sm} font-medium text-gray-700 dark:text-gray-300 mb-1`}>
+                  {t('promptManagement.fileName')}
+                  {isNew && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  placeholder="my-template-name"
+                  disabled={template.template_name === 'default'}
+                  className={`w-full px-3 py-2 ${fontClasses.base} border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-600`}
+                />
+                <p className={`mt-1 ${fontClasses.xs} text-gray-500 dark:text-gray-400`}>
+                  {t('promptManagement.fileNameHint')}
+                </p>
+              </div>
+            )}
 
             {/* System Prompt */}
             <div className="flex-1">
@@ -205,19 +214,6 @@ function TemplateEditor({
               />
             </div>
 
-            {/* Default checkbox */}
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="is-default"
-                checked={isDefault}
-                onChange={(e) => setIsDefault(e.target.checked)}
-                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-              />
-              <label htmlFor="is-default" className={`${fontClasses.sm} text-gray-700 dark:text-gray-300`}>
-                {t('promptManagement.defaultTemplate')}
-              </label>
-            </div>
           </div>
 
           {/* Variable Panel */}
@@ -243,7 +239,7 @@ function TemplateEditor({
           </button>
           <button
             onClick={handleSave}
-            disabled={!name.trim() || !systemPrompt.trim()}
+            disabled={!displayName.trim() || !systemPrompt.trim()}
             className={`flex items-center gap-2 px-4 py-2 ${fontClasses.sm} bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
           >
             <Save className="w-4 h-4" />
@@ -258,12 +254,16 @@ function TemplateEditor({
 // Template Card Component
 function TemplateCard({
   template,
+  isDefault,
   onEdit,
   onDelete,
+  onSetDefault,
 }: {
   template: PromptTemplateDB
+  isDefault: boolean
   onEdit: () => void
   onDelete: () => void
+  onSetDefault: () => void
 }) {
   const { t } = useTranslation()
   const fontSize = useAppStore((state) => state.fontSize)
@@ -271,6 +271,7 @@ function TemplateCard({
   const [expanded, setExpanded] = useState(false)
 
   const CategoryIcon = CATEGORY_ICONS[template.category as PromptCategory] || FileText
+  const isBuiltin = template.template_name === 'default'
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -284,22 +285,44 @@ function TemplateCard({
           <div>
             <div className="flex items-center gap-2">
               <span className={`${fontClasses.base} font-medium text-gray-900 dark:text-white`}>
-                {template.name}
+                {template.display_name}
               </span>
-              {template.is_default && (
-                <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+              {isDefault && (
+                <span title={t('prompts.defaultTemplate')}>
+                  <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                </span>
               )}
-              {template.is_builtin && (
-                <Lock className="w-4 h-4 text-gray-400" />
+              {isBuiltin && (
+                <span title={t('prompts.builtinTemplate')}>
+                  <Lock className="w-4 h-4 text-gray-400" />
+                </span>
               )}
             </div>
-            <span className={`${fontClasses.xs} text-gray-500 dark:text-gray-400`}>
-              {t(`promptManagement.categories.${template.category}`)}
-              {template.description && ` - ${template.description}`}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`${fontClasses.xs} text-gray-500 dark:text-gray-400`}>
+                {t(`promptManagement.categories.${template.category}`)}
+              </span>
+              <span className={`${fontClasses.xs} text-gray-400`}>•</span>
+              <code className={`${fontClasses.xs} font-mono text-gray-400 dark:text-gray-500`}>
+                {template.template_name}.md
+              </code>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Set as default button - only show if not already default */}
+          {!isDefault && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onSetDefault()
+              }}
+              className="p-1.5 text-gray-400 hover:text-amber-500 dark:text-gray-500 dark:hover:text-amber-400 transition-colors"
+              title={t('promptManagement.setAsDefault')}
+            >
+              <Star className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -309,7 +332,7 @@ function TemplateCard({
           >
             <Edit3 className="w-4 h-4" />
           </button>
-          {!template.is_builtin && (
+          {!isBuiltin && (
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -330,7 +353,17 @@ function TemplateCard({
 
       {/* Expanded Content */}
       {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+        <div className="border-t border-gray-200 dark:border-gray-700 p-3 space-y-3">
+          {/* File Name */}
+          <div className="flex items-center gap-2">
+            <label className={`${fontClasses.xs} font-medium text-gray-500 dark:text-gray-400`}>
+              {t('promptManagement.fileName')}:
+            </label>
+            <code className={`${fontClasses.xs} font-mono px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded`}>
+              system.{template.template_name}.md
+            </code>
+          </div>
+          {/* System Prompt */}
           <div>
             <label className={`block ${fontClasses.xs} font-medium text-gray-500 dark:text-gray-400 mb-1`}>
               {t('prompts.systemPrompt')}
@@ -349,13 +382,17 @@ function TemplateCard({
 function CategorySection({
   category,
   templates,
+  defaultTemplate,
   onEdit,
   onDelete,
+  onSetDefault,
 }: {
   category: PromptCategory
   templates: PromptTemplateDB[]
+  defaultTemplate: string
   onEdit: (template: PromptTemplateDB) => void
   onDelete: (template: PromptTemplateDB) => void
+  onSetDefault: (template: PromptTemplateDB) => void
 }) {
   const { t } = useTranslation()
   const fontSize = useAppStore((state) => state.fontSize)
@@ -389,10 +426,12 @@ function CategorySection({
         <div className="pl-6 space-y-2">
           {categoryTemplates.map((template) => (
             <TemplateCard
-              key={template.id}
+              key={`${template.category}-${template.template_name}`}
               template={template}
+              isDefault={template.template_name === defaultTemplate}
               onEdit={() => onEdit(template)}
               onDelete={() => onDelete(template)}
+              onSetDefault={() => onSetDefault(template)}
             />
           ))}
         </div>
@@ -428,7 +467,7 @@ function ProjectSelector({
         <option value="">{t('promptManagement.selectProject')}</option>
         {projects.map((project) => (
           <option key={project.id} value={project.id}>
-            {project.name} {project.author ? `(${project.author})` : ''}
+            {project.is_favorite ? '\u2605 ' : ''}{project.name} {project.author ? `(${project.author})` : ''}
           </option>
         ))}
       </select>
@@ -446,11 +485,18 @@ export function PromptManagementPage() {
   const [isAddingTemplate, setIsAddingTemplate] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
-  // Fetch templates
+  // Fetch templates (directly from filesystem via API)
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ['promptTemplates'],
     queryFn: () => api.getPromptTemplates(),
   })
+
+  // Fetch default templates configuration
+  const { data: defaultsData } = useQuery({
+    queryKey: ['promptDefaults'],
+    queryFn: () => api.getDefaultTemplates(),
+  })
+  const defaults = defaultsData?.defaults || {}
 
   // Fetch projects for project selector
   const { data: projects = [] } = useQuery({
@@ -458,13 +504,16 @@ export function PromptManagementPage() {
     queryFn: api.getProjects,
   })
 
-  // Sync builtin templates mutation
-  const syncMutation = useMutation({
-    mutationFn: api.syncBuiltinTemplates,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['promptTemplates'] })
-    },
-  })
+  // Auto-select first favorite project when projects load
+  useEffect(() => {
+    if (projects.length > 0 && !selectedProjectId) {
+      // Projects are sorted by is_favorite desc, so first favorite is at the start
+      const favoriteProject = projects.find((p) => p.is_favorite)
+      if (favoriteProject) {
+        setSelectedProjectId(favoriteProject.id)
+      }
+    }
+  }, [projects, selectedProjectId])
 
   // Create template mutation
   const createMutation = useMutation({
@@ -477,8 +526,8 @@ export function PromptManagementPage() {
 
   // Update template mutation
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof api.updatePromptTemplateById>[1] }) =>
-      api.updatePromptTemplateById(id, data),
+    mutationFn: ({ category, templateName, data }: { category: string; templateName: string; data: Parameters<typeof api.updatePromptTemplate>[2] }) =>
+      api.updatePromptTemplate(category, templateName, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['promptTemplates'] })
       setEditingTemplate(null)
@@ -487,28 +536,36 @@ export function PromptManagementPage() {
 
   // Delete template mutation
   const deleteMutation = useMutation({
-    mutationFn: api.deletePromptTemplate,
+    mutationFn: ({ category, templateName }: { category: string; templateName: string }) =>
+      api.deletePromptTemplate(category, templateName),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['promptTemplates'] })
     },
   })
 
+  // Set default template mutation
+  const setDefaultMutation = useMutation({
+    mutationFn: ({ category, templateName }: { category: string; templateName: string }) =>
+      api.setDefaultTemplate(category, templateName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['promptDefaults'] })
+    },
+  })
+
   const handleDeleteTemplate = (template: PromptTemplateDB) => {
-    if (template.is_builtin) {
+    // Cannot delete builtin templates
+    if (template.template_name === 'default') {
       alert(t('promptManagement.cannotDeleteBuiltin'))
       return
     }
     if (confirm(t('promptManagement.confirmDelete'))) {
-      deleteMutation.mutate(template.id)
+      deleteMutation.mutate({ category: template.category, templateName: template.template_name })
     }
   }
 
-  // Sync templates on first load if empty
-  useEffect(() => {
-    if (!templatesLoading && templates.length === 0) {
-      syncMutation.mutate()
-    }
-  }, [templatesLoading, templates.length])
+  const handleSetDefault = (template: PromptTemplateDB) => {
+    setDefaultMutation.mutate({ category: template.category, templateName: template.template_name })
+  }
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -523,14 +580,6 @@ export function PromptManagementPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            className={`flex items-center gap-2 px-3 py-2 ${fontClasses.sm} text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors disabled:opacity-50`}
-          >
-            <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-            {syncMutation.isPending ? t('promptManagement.syncing') : t('promptManagement.syncFromFiles')}
-          </button>
           <button
             onClick={() => setIsAddingTemplate(true)}
             className={`flex items-center gap-2 px-4 py-2 ${fontClasses.sm} bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors`}
@@ -576,8 +625,10 @@ export function PromptManagementPage() {
                 key={category}
                 category={category}
                 templates={templates}
+                defaultTemplate={defaults[category] || 'default'}
                 onEdit={setEditingTemplate}
                 onDelete={handleDeleteTemplate}
+                onSetDefault={handleSetDefault}
               />
             ))}
           </div>
@@ -623,9 +674,38 @@ export function PromptManagementPage() {
         <TemplateEditor
           template={editingTemplate || {}}
           isNew={isAddingTemplate}
-          onSave={(data) => {
+          onSave={async (data) => {
             if (editingTemplate) {
-              updateMutation.mutate({ id: editingTemplate.id, data })
+              const originalName = editingTemplate.template_name
+              const newName = data.template_name
+
+              // Check if template name changed (rename)
+              if (newName && newName !== originalName && originalName !== 'default') {
+                try {
+                  // First rename the template
+                  await api.renamePromptTemplate(editingTemplate.category, originalName, newName)
+                  // Then update the content and display name with the new name
+                  await api.updatePromptTemplate(editingTemplate.category, newName, {
+                    system_prompt: data.system_prompt,
+                    display_name: data.display_name
+                  })
+                  queryClient.invalidateQueries({ queryKey: ['promptTemplates'] })
+                  setEditingTemplate(null)
+                } catch (error) {
+                  console.error('Failed to rename template:', error)
+                  alert('Failed to rename template. The name may already exist or be invalid.')
+                }
+              } else {
+                // Just update content and display name
+                updateMutation.mutate({
+                  category: editingTemplate.category,
+                  templateName: originalName,
+                  data: {
+                    system_prompt: data.system_prompt,
+                    display_name: data.display_name
+                  }
+                })
+              }
             } else {
               createMutation.mutate(data)
             }
@@ -644,12 +724,16 @@ export function PromptManagementPage() {
 function UserPromptEditor({
   category,
   currentPrompt,
+  hasCustomPrompt = false,
   onSave,
+  onReset,
   onCancel,
 }: {
   category: PromptCategory
   currentPrompt: string
+  hasCustomPrompt?: boolean
   onSave: (prompt: string) => void
+  onReset?: () => void
   onCancel: () => void
 }) {
   const { t } = useTranslation()
@@ -697,6 +781,11 @@ function UserPromptEditor({
             <h2 className={`${fontClasses.heading} font-semibold text-gray-900 dark:text-white`}>
               {t('promptManagement.editUserPrompt')} - {t(`promptManagement.categories.${category}`)}
             </h2>
+            {hasCustomPrompt && (
+              <span className={`${fontClasses.xs} px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded`}>
+                {t('prompts.modified')}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -750,20 +839,33 @@ function UserPromptEditor({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
-          <button
-            onClick={onCancel}
-            className={`px-4 py-2 ${fontClasses.sm} text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors`}
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            onClick={() => onSave(userPrompt)}
-            className={`flex items-center gap-2 px-4 py-2 ${fontClasses.sm} bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors`}
-          >
-            <Save className="w-4 h-4" />
-            {t('common.save')}
-          </button>
+        <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700">
+          <div>
+            {hasCustomPrompt && onReset && (
+              <button
+                onClick={onReset}
+                className={`flex items-center gap-2 px-4 py-2 ${fontClasses.sm} text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-md transition-colors`}
+              >
+                <RefreshCw className="w-4 h-4" />
+                {t('promptManagement.resetToDefault')}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onCancel}
+              className={`px-4 py-2 ${fontClasses.sm} text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors`}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              onClick={() => onSave(userPrompt)}
+              className={`flex items-center gap-2 px-4 py-2 ${fontClasses.sm} bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors`}
+            >
+              <Save className="w-4 h-4" />
+              {t('common.save')}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -798,15 +900,29 @@ function ProjectPromptConfigs({
     },
   })
 
+  // Reset user prompt mutation
+  const resetMutation = useMutation({
+    mutationFn: (category: string) => api.resetProjectUserPrompt(projectId, category),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projectPromptConfigs', projectId] })
+    },
+  })
+
   const handleSaveUserPrompt = (category: PromptCategory, prompt: string) => {
     updateMutation.mutate({
       category,
       data: {
-        custom_user_prompt: prompt,
-        use_custom_user: prompt.length > 0,
+        custom_user_prompt: prompt,  // If provided, saves to project file
       },
     })
     setEditingCategory(null)
+  }
+
+  const handleResetUserPrompt = (category: PromptCategory) => {
+    if (window.confirm(t('promptManagement.confirmResetPrompt'))) {
+      resetMutation.mutate(category)
+      setEditingCategory(null)
+    }
   }
 
   if (isLoading) {
@@ -823,7 +939,7 @@ function ProjectPromptConfigs({
         {CATEGORIES.map((category) => {
           const config = configs.find((c) => c.category === category)
           const CategoryIcon = CATEGORY_ICONS[category]
-          const hasContent = !!config?.custom_user_prompt
+          const hasCustomUserPrompt = config?.has_custom_user_prompt || false
 
           return (
             <div
@@ -839,26 +955,44 @@ function ProjectPromptConfigs({
                   <h3 className={`${fontClasses.base} font-medium text-gray-900 dark:text-white`}>
                     {t(`promptManagement.categories.${category}`)}
                   </h3>
-                  {hasContent && (
+                  {hasCustomUserPrompt && (
                     <span className={`${fontClasses.xs} px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded`}>
                       {t('prompts.modified')}
                     </span>
                   )}
                 </div>
-                <button
-                  className="p-1.5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
-                  title={t('common.edit')}
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  {hasCustomUserPrompt && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleResetUserPrompt(category)
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-orange-600 dark:text-gray-400 dark:hover:text-orange-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                      title={t('promptManagement.resetToDefault')}
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingCategory(category)
+                    }}
+                    className="p-1.5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                    title={t('common.edit')}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
-              {/* Preview of content */}
-              {hasContent && config?.custom_user_prompt && (
+              {/* Preview of resolved user prompt */}
+              {config?.resolved_user_prompt && (
                 <div className="px-3 py-2 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600">
                   <p className={`${fontClasses.xs} text-gray-500 dark:text-gray-400 font-mono truncate`}>
-                    {config.custom_user_prompt.substring(0, 100)}
-                    {config.custom_user_prompt.length > 100 ? '...' : ''}
+                    {config.resolved_user_prompt.substring(0, 100)}
+                    {config.resolved_user_prompt.length > 100 ? '...' : ''}
                   </p>
                 </div>
               )}
@@ -871,8 +1005,10 @@ function ProjectPromptConfigs({
       {editingCategory && (
         <UserPromptEditor
           category={editingCategory}
-          currentPrompt={configs.find((c) => c.category === editingCategory)?.custom_user_prompt || ''}
+          currentPrompt={configs.find((c) => c.category === editingCategory)?.resolved_user_prompt || ''}
+          hasCustomPrompt={configs.find((c) => c.category === editingCategory)?.has_custom_user_prompt || false}
           onSave={(prompt) => handleSaveUserPrompt(editingCategory, prompt)}
+          onReset={() => handleResetUserPrompt(editingCategory)}
           onCancel={() => setEditingCategory(null)}
         />
       )}

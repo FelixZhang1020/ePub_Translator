@@ -1,4 +1,14 @@
-"""LLM integration package."""
+"""LLM integration package.
+
+This package provides:
+- LLM configuration management (LLMConfigService, LLMConfigManager)
+- Model and provider information (LLMService with get_providers, get_models)
+- Cost estimation and connection testing
+
+For actual translation, use the translation pipeline:
+- app.core.translation.pipeline.TranslationPipeline
+- app.core.translation.pipeline.GatewayFactory
+"""
 
 from .service import (
     LLMService,
@@ -7,7 +17,6 @@ from .service import (
     ProviderInfo,
     CostEstimate,
 )
-from .adapter import TranslationRequest, TranslationResponse
 from .config import LLMConfigManager, llm_config
 from .config_service import LLMConfigService, llm_config_service, ResolvedLLMConfig
 
@@ -17,8 +26,6 @@ __all__ = [
     "ModelInfo",
     "ProviderInfo",
     "CostEstimate",
-    "TranslationRequest",
-    "TranslationResponse",
     "LLMConfigManager",
     "llm_config",
     "LLMConfigService",

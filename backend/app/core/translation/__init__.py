@@ -6,11 +6,8 @@ Architecture:
 - models/: Data models (TranslationContext, PromptBundle, etc.)
 - strategies/: Prompt strategies for different translation modes
 - pipeline/: Pipeline components (ContextBuilder, PromptEngine, etc.)
-- orchestrator.py: Legacy orchestrator (backwards compatible)
-- orchestrator_v2.py: New orchestrator using pipeline architecture
+- orchestrator.py: Orchestrator using pipeline architecture
 """
-
-from typing import TYPE_CHECKING
 
 # Re-export models for convenience
 from .models import (
@@ -44,23 +41,8 @@ from .pipeline import (
     PipelineConfig,
 )
 
-# Lazy imports for orchestrators to avoid circular import issues
-# and missing dependencies during development
-if TYPE_CHECKING:
-    from .orchestrator import TranslationOrchestrator
-    from .orchestrator_v2 import TranslationOrchestratorV2
-
-
-def get_orchestrator():
-    """Get the legacy TranslationOrchestrator class."""
-    from .orchestrator import TranslationOrchestrator
-    return TranslationOrchestrator
-
-
-def get_orchestrator_v2():
-    """Get the new TranslationOrchestratorV2 class."""
-    from .orchestrator_v2 import TranslationOrchestratorV2
-    return TranslationOrchestratorV2
+# Re-export orchestrator
+from .orchestrator import TranslationOrchestrator, TranslationProgressTracker
 
 
 __all__ = [
@@ -86,7 +68,7 @@ __all__ = [
     "OutputProcessor",
     "TranslationPipeline",
     "PipelineConfig",
-    # Orchestrator getters
-    "get_orchestrator",
-    "get_orchestrator_v2",
+    # Orchestrator
+    "TranslationOrchestrator",
+    "TranslationProgressTracker",
 ]

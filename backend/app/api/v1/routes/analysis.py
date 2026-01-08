@@ -9,41 +9,30 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db
+from app.models.schemas import LLMConfigMixin, LLMTaskRequest
 from app.core.analysis.service import analysis_service
 from app.core.llm.config_service import LLMConfigService
 
 router = APIRouter()
 
 
-class StartAnalysisRequest(BaseModel):
+class StartAnalysisRequest(LLMTaskRequest):
     """Request model for starting analysis."""
-    # Option 1: Use stored config (recommended)
-    config_id: Optional[str] = None
-    # Option 2: Direct parameters (for debugging/backwards compatibility)
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    provider: Optional[str] = None
-    # Analysis options
+
     sample_count: int = 20
-    custom_system_prompt: Optional[str] = None
-    custom_user_prompt: Optional[str] = None
 
 
 class UpdateAnalysisRequest(BaseModel):
     """Request model for updating analysis - accepts dynamic fields."""
-    updates: dict[str, Any] = {}  # Dynamic fields to update
+
+    updates: dict[str, Any] = {}
     confirm: bool = False
 
 
-class RegenerateFieldRequest(BaseModel):
+class RegenerateFieldRequest(LLMConfigMixin):
     """Request model for regenerating a field."""
+
     field: str
-    # Option 1: Use stored config (recommended)
-    config_id: Optional[str] = None
-    # Option 2: Direct parameters (for debugging/backwards compatibility)
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    provider: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):

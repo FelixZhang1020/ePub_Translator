@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.database import get_db, Project
-from app.core.epub.parser_v2 import EPUBParserV2
+from app.core.epub import EPUBParserV2
 
 router = APIRouter()
 
@@ -74,9 +74,11 @@ async def upload_epub(
 
 @router.get("/projects")
 async def list_projects(db: AsyncSession = Depends(get_db)):
-    """List all projects."""
+    """List all projects, favorites first."""
     from sqlalchemy import select
-    result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+    result = await db.execute(
+        select(Project).order_by(Project.is_favorite.desc(), Project.created_at.desc())
+    )
     projects = result.scalars().all()
     return [
         {
@@ -86,6 +88,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
             "status": p.status,
             "total_chapters": p.total_chapters,
             "total_paragraphs": p.total_paragraphs,
+            "is_favorite": p.is_favorite,
             "created_at": p.created_at.isoformat(),
         }
         for p in projects
@@ -130,6 +133,21 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     return {"status": "deleted"}
+
+
+@router.post("/projects/{project_id}/favorite")
+async def toggle_favorite(project_id: str, db: AsyncSession = Depends(get_db)):
+    """Toggle the favorite status of a project."""
+    from sqlalchemy import select
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project.is_favorite = not project.is_favorite
+    await db.commit()
+
+    return {"id": project.id, "is_favorite": project.is_favorite}
 
 
 @router.post("/projects/{project_id}/reparse")

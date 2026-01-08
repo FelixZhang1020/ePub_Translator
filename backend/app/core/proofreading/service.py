@@ -19,6 +19,7 @@ from app.models.database.proofreading import (
     ProofreadingSuggestion,
     ProofreadingStatus,
     SuggestionStatus,
+    ImprovementLevel,
 )
 from app.core.prompts.loader import PromptLoader
 
@@ -201,7 +202,18 @@ class ProofreadingService:
                     result_data = self._parse_json_response(content)
 
                     # Only create suggestion if improvement is needed
-                    if result_data.get("needs_improvement"):
+                    # Support both old format (needs_improvement) and new format (improvement_level)
+                    improvement_level = result_data.get("improvement_level", "none")
+                    needs_improvement = result_data.get("needs_improvement", False)
+
+                    # Determine if we should create a suggestion
+                    should_create = needs_improvement or improvement_level in [
+                        ImprovementLevel.OPTIONAL.value,
+                        ImprovementLevel.RECOMMENDED.value,
+                        ImprovementLevel.CRITICAL.value,
+                    ]
+
+                    if should_create:
                         suggestion = ProofreadingSuggestion(
                             id=str(uuid.uuid4()),
                             session_id=session_id,
@@ -209,6 +221,8 @@ class ProofreadingService:
                             original_translation=latest_translation.translated_text,
                             suggested_translation=result_data.get("suggested_translation", ""),
                             explanation=result_data.get("explanation", ""),
+                            improvement_level=improvement_level,
+                            issue_types=result_data.get("issue_types", []),
                             status=SuggestionStatus.PENDING.value,
                         )
                         db.add(suggestion)
@@ -338,6 +352,8 @@ class ProofreadingService:
                 "original_translation": s.original_translation,
                 "suggested_translation": s.suggested_translation,
                 "explanation": s.explanation,
+                "improvement_level": s.improvement_level,
+                "issue_types": s.issue_types or [],
                 "status": s.status,
                 "user_modified_text": s.user_modified_text,
                 "created_at": s.created_at.isoformat(),

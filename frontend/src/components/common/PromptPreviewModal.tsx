@@ -1,20 +1,130 @@
-import { useState, useEffect } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { X, RotateCcw, Send, FileText, Code, List, Loader2, Save, Check } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import {
+  X,
+  RotateCcw,
+  Send,
+  FileText,
+  Code,
+  Loader2,
+  ChevronDown,
+  Star,
+  Check,
+  RefreshCw,
+} from 'lucide-react'
 import { api } from '../../services/api/client'
 import { useTranslation } from '../../stores/appStore'
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface PromptPreviewModalProps {
   isOpen: boolean
   onClose: () => void
   onConfirm: (systemPrompt?: string, userPrompt?: string) => void
-  promptType: 'analysis' | 'translation' | 'reasoning' | 'proofreading'
+  promptType: 'analysis' | 'translation' | 'proofreading' | 'optimization'
   variables: Record<string, unknown>
   title?: string
   isLoading?: boolean
+  projectId?: string
 }
 
-type TabType = 'system' | 'user' | 'variables'
+type TabType = 'system' | 'user'
+
+interface TemplateOption {
+  name: string
+  displayName: string
+  systemPrompt: string
+  userPrompt: string
+}
+
+// =============================================================================
+// Template Dropdown Component
+// =============================================================================
+
+function TemplateDropdown({
+  options,
+  selectedName,
+  defaultName,
+  onSelect,
+  disabled,
+}: {
+  options: TemplateOption[]
+  selectedName: string
+  defaultName: string
+  onSelect: (name: string) => void
+  disabled?: boolean
+}) {
+  const { t } = useTranslation()
+  const [isOpen, setIsOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selected = options.find(o => o.name === selectedName)
+  const isDefault = selectedName === defaultName
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        disabled={disabled}
+        className="flex items-center gap-2 px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 min-w-[200px] justify-between text-sm disabled:opacity-50 transition-colors"
+      >
+        <div className="flex items-center gap-2 truncate">
+          {isDefault && (
+            <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
+          )}
+          <span className="truncate">{selected?.displayName || t('prompts.selectTemplate')}</span>
+        </div>
+        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 w-full min-w-[240px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 max-h-64 overflow-auto">
+          {options.map((option) => {
+            const isOptionDefault = option.name === defaultName
+            const isSelected = option.name === selectedName
+
+            return (
+              <button
+                key={option.name}
+                type="button"
+                onClick={() => {
+                  onSelect(option.name)
+                  setIsOpen(false)
+                }}
+                className={`w-full text-left px-3 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-gray-900 dark:text-gray-100 text-sm transition-colors ${
+                  isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                }`}
+              >
+                <div className="w-5 flex-shrink-0">
+                  {isOptionDefault && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />}
+                </div>
+                <span className="flex-1 truncate">{option.displayName}</span>
+                {isSelected && <Check className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// =============================================================================
+// Main Component
+// =============================================================================
 
 export function PromptPreviewModal({
   isOpen,
@@ -24,290 +134,361 @@ export function PromptPreviewModal({
   variables,
   title,
   isLoading = false,
+  projectId,
 }: PromptPreviewModalProps) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<TabType>('system')
-  const [systemPrompt, setSystemPrompt] = useState('')
-  const [userPrompt, setUserPrompt] = useState('')
-  const [isModified, setIsModified] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
 
-  // Fetch prompt template
-  const { data: template, isLoading: templateLoading } = useQuery({
-    queryKey: ['prompt-template', promptType],
-    queryFn: () => api.getPromptTemplate(promptType),
+  // UI State
+  const [activeTab, setActiveTab] = useState<TabType>('system')
+
+  // System prompt state
+  const [systemTemplateName, setSystemTemplateName] = useState('default')
+  const [systemPromptOriginal, setSystemPromptOriginal] = useState('')
+  const [systemPromptEdited, setSystemPromptEdited] = useState('')
+  const [systemPromptRendered, setSystemPromptRendered] = useState('')
+
+  // User prompt state (from project, no template selection)
+  const [userPromptOriginal, setUserPromptOriginal] = useState('')
+  const [userPromptEdited, setUserPromptEdited] = useState('')
+  const [userPromptRendered, setUserPromptRendered] = useState('')
+
+  // Fetch available templates (for system prompt only)
+  const { data: templatesData, isLoading: templatesLoading } = useQuery({
+    queryKey: ['prompt-templates', promptType],
+    queryFn: () => api.getPromptTemplates(promptType),
     enabled: isOpen,
+  })
+
+  // Fetch default template name
+  const { data: defaultData } = useQuery({
+    queryKey: ['prompt-default', promptType],
+    queryFn: () => api.getDefaultTemplate(promptType),
+    enabled: isOpen,
+  })
+
+  // Fetch project-resolved prompts (for user prompt)
+  const { data: projectPromptsData, isLoading: projectPromptsLoading } = useQuery({
+    queryKey: ['project-resolved-prompts', projectId, promptType],
+    queryFn: () => api.getProjectResolvedPrompts(projectId!, promptType),
+    enabled: isOpen && !!projectId,
   })
 
   // Preview mutation
   const previewMutation = useMutation({
-    mutationFn: () => api.previewPrompt(
-      promptType,
-      variables,
-      isModified ? systemPrompt : undefined,
-      isModified ? userPrompt : undefined,
-    ),
-  })
-
-  // Save mutation - permanently saves to .md files
-  const saveMutation = useMutation({
-    mutationFn: () => api.updatePromptTemplate(promptType, systemPrompt, userPrompt),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['prompt-template', promptType] })
-      setIsModified(false)
-      setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 2000)
+    mutationFn: (params: { systemPrompt: string; userPrompt: string }) =>
+      api.previewPrompt(promptType, variables, params.systemPrompt, params.userPrompt),
+    onSuccess: (data) => {
+      setSystemPromptRendered(data.system_prompt)
+      setUserPromptRendered(data.user_prompt)
     },
   })
 
-  // Load template when fetched
+  // Build template options (for system prompt only)
+  const templateOptions: TemplateOption[] = (templatesData || []).map(t => ({
+    name: t.template_name,
+    displayName: t.display_name,
+    systemPrompt: t.system_prompt,
+    userPrompt: t.user_prompt,
+  }))
+
+  const defaultTemplateName = defaultData?.template_name || 'default'
+
+  // Initialize when modal opens and data is ready
   useEffect(() => {
-    if (template) {
-      setSystemPrompt(template.system_prompt)
-      setUserPrompt(template.user_prompt_template)
-      setIsModified(false)
-      // Auto-preview with variables
-      previewMutation.mutate()
+    if (!isOpen || templateOptions.length === 0) return
+
+    // Find default template for system prompt
+    const defaultTemplate = templateOptions.find(t => t.name === defaultTemplateName) || templateOptions[0]
+    if (!defaultTemplate) return
+
+    // Initialize system prompt from template
+    setSystemTemplateName(defaultTemplate.name)
+    setSystemPromptOriginal(defaultTemplate.systemPrompt)
+    setSystemPromptEdited(defaultTemplate.systemPrompt)
+
+    // Initialize user prompt from project-resolved prompts (if available) or default template
+    const userPrompt = projectPromptsData?.user_prompt || defaultTemplate.userPrompt
+    setUserPromptOriginal(userPrompt)
+    setUserPromptEdited(userPrompt)
+
+    // Trigger initial preview
+    previewMutation.mutate({
+      systemPrompt: defaultTemplate.systemPrompt,
+      userPrompt: userPrompt,
+    })
+  }, [isOpen, templateOptions.length, defaultTemplateName, projectPromptsData])
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveTab('system')
+      setSystemTemplateName('default')
+      setSystemPromptOriginal('')
+      setSystemPromptEdited('')
+      setSystemPromptRendered('')
+      setUserPromptOriginal('')
+      setUserPromptEdited('')
+      setUserPromptRendered('')
     }
-  }, [template])
+  }, [isOpen])
 
-  // Handle prompt changes
-  const handleSystemPromptChange = (value: string) => {
-    setSystemPrompt(value)
-    setIsModified(true)
-  }
+  // Handle system template selection
+  const handleSystemTemplateSelect = useCallback((name: string) => {
+    const template = templateOptions.find(t => t.name === name)
+    if (!template) return
 
-  const handleUserPromptChange = (value: string) => {
-    setUserPrompt(value)
-    setIsModified(true)
-  }
+    setSystemTemplateName(name)
+    setSystemPromptOriginal(template.systemPrompt)
+    setSystemPromptEdited(template.systemPrompt)
 
-  // Reset to template defaults
-  const handleReset = () => {
-    if (template) {
-      setSystemPrompt(template.system_prompt)
-      setUserPrompt(template.user_prompt_template)
-      setIsModified(false)
-      previewMutation.mutate()
-    }
-  }
+    previewMutation.mutate({
+      systemPrompt: template.systemPrompt,
+      userPrompt: userPromptEdited,
+    })
+  }, [templateOptions, userPromptEdited, previewMutation])
+
+  // Handle system prompt edit
+  const handleSystemPromptChange = useCallback((value: string) => {
+    setSystemPromptEdited(value)
+  }, [])
+
+  // Handle user prompt edit
+  const handleUserPromptChange = useCallback((value: string) => {
+    setUserPromptEdited(value)
+  }, [])
+
+  // Reset system prompt to original
+  const handleResetSystemPrompt = useCallback(() => {
+    setSystemPromptEdited(systemPromptOriginal)
+    previewMutation.mutate({
+      systemPrompt: systemPromptOriginal,
+      userPrompt: userPromptEdited,
+    })
+  }, [systemPromptOriginal, userPromptEdited, previewMutation])
+
+  // Reset user prompt to original
+  const handleResetUserPrompt = useCallback(() => {
+    setUserPromptEdited(userPromptOriginal)
+    previewMutation.mutate({
+      systemPrompt: systemPromptEdited,
+      userPrompt: userPromptOriginal,
+    })
+  }, [userPromptOriginal, systemPromptEdited, previewMutation])
 
   // Refresh preview
-  const handleRefreshPreview = () => {
-    previewMutation.mutate()
-  }
+  const handleRefreshPreview = useCallback(() => {
+    previewMutation.mutate({
+      systemPrompt: systemPromptEdited,
+      userPrompt: userPromptEdited,
+    })
+  }, [systemPromptEdited, userPromptEdited, previewMutation])
 
-  // Confirm and execute
-  const handleConfirm = () => {
-    // Only pass custom prompts if modified
-    if (isModified) {
-      const finalSystemPrompt = previewMutation.data?.system_prompt || systemPrompt
-      const finalUserPrompt = previewMutation.data?.user_prompt || userPrompt
-      onConfirm(finalSystemPrompt, finalUserPrompt)
-    } else {
-      // Use default prompts (pass undefined)
-      onConfirm(undefined, undefined)
-    }
-  }
+  // Handle confirm
+  const handleConfirm = useCallback(() => {
+    // Use rendered prompts (with variables substituted)
+    onConfirm(systemPromptRendered, userPromptRendered)
+  }, [systemPromptRendered, userPromptRendered, onConfirm])
+
+  // Computed state
+  const isSystemEdited = systemPromptEdited !== systemPromptOriginal
+  const isUserEdited = userPromptEdited !== userPromptOriginal
+  const isDataLoading = templatesLoading || projectPromptsLoading || templateOptions.length === 0
 
   if (!isOpen) return null
 
-  const tabs: { id: TabType; labelKey: string; icon: typeof FileText }[] = [
-    { id: 'system', labelKey: 'prompts.systemPrompt', icon: FileText },
-    { id: 'user', labelKey: 'prompts.userPrompt', icon: Code },
-    { id: 'variables', labelKey: 'prompts.variables', icon: List },
-  ]
+  // Current tab data
+  const currentPromptEdited = activeTab === 'system' ? systemPromptEdited : userPromptEdited
+  const currentPromptRendered = activeTab === 'system' ? systemPromptRendered : userPromptRendered
+  const currentIsEdited = activeTab === 'system' ? isSystemEdited : isUserEdited
+  const handlePromptChange = activeTab === 'system' ? handleSystemPromptChange : handleUserPromptChange
+  const handleReset = activeTab === 'system' ? handleResetSystemPrompt : handleResetUserPrompt
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            {title || t('prompts.title')}
-          </h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {title || t('prompts.title')}
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {t(`promptManagement.categories.${promptType}`)}
+              </p>
+            </div>
+          </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded"
+            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
-          {tabs.map(({ id, labelKey, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === id
-                  ? 'text-blue-600 border-blue-600 dark:text-blue-400 dark:border-blue-400'
-                  : 'text-gray-500 border-transparent hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {t(labelKey)}
-            </button>
-          ))}
+        <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6">
+          <button
+            type="button"
+            onClick={() => setActiveTab('system')}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'system'
+                ? 'text-blue-600 border-blue-600 dark:text-blue-400 dark:border-blue-400'
+                : 'text-gray-500 border-transparent hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            {t('prompts.systemPrompt')}
+            {isSystemEdited && <span className="w-2 h-2 rounded-full bg-amber-500" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('user')}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'user'
+                ? 'text-blue-600 border-blue-600 dark:text-blue-400 dark:border-blue-400'
+                : 'text-gray-500 border-transparent hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            <Code className="w-4 h-4" />
+            {t('prompts.userPrompt')}
+            {isUserEdited && <span className="w-2 h-2 rounded-full bg-amber-500" />}
+          </button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-6">
-          {templateLoading ? (
+          {isDataLoading ? (
             <div className="flex items-center justify-center h-64">
-              <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full" />
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                <span className="text-sm text-gray-500">{t('prompts.loading')}</span>
+              </div>
             </div>
           ) : (
-            <>
-              {activeTab === 'system' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {t('prompts.systemPrompt')}
-                    </label>
-                    <div className="flex items-center gap-3">
-                      {isModified && (
-                        <span className="text-xs text-amber-600 dark:text-amber-400">
-                          {t('prompts.modified')}
-                        </span>
-                      )}
+            <div className="space-y-5">
+              {/* Template Selector - Only for System Prompt */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {activeTab === 'system' && (
+                    <>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {t('prompts.selectTemplate')}
+                      </label>
+                      <TemplateDropdown
+                        options={templateOptions}
+                        selectedName={systemTemplateName}
+                        defaultName={defaultTemplateName}
+                        onSelect={handleSystemTemplateSelect}
+                      />
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {currentIsEdited && (
+                    <>
+                      <span className="text-xs text-amber-600 dark:text-amber-400 px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20">
+                        {t('prompts.modified')}
+                      </span>
                       <button
-                        onClick={handleRefreshPreview}
-                        disabled={previewMutation.isPending}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                        type="button"
+                        onClick={handleReset}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 px-2 py-1"
                       >
-                        <RotateCcw className={`w-3 h-3 ${previewMutation.isPending ? 'animate-spin' : ''}`} />
-                        {t('prompts.refreshPreview')}
+                        <RotateCcw className="w-3 h-3" />
+                        {t('prompts.reset')}
                       </button>
-                    </div>
-                  </div>
-                  <textarea
-                    value={systemPrompt}
-                    onChange={(e) => handleSystemPromptChange(e.target.value)}
-                    className="w-full h-48 px-4 py-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 font-mono text-sm resize-none"
-                    placeholder={t('prompts.systemPromptPlaceholder')}
-                  />
-
-                  {/* Rendered Preview */}
-                  <div className="mt-4">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                      {t('prompts.renderedPreview')}
-                    </label>
-                    <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 max-h-64 overflow-auto">
-                      <pre className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono">
-                        {previewMutation.data?.system_prompt || t('prompts.clickRefresh')}
-                      </pre>
-                    </div>
-                  </div>
+                    </>
+                  )}
                 </div>
-              )}
+              </div>
 
-              {activeTab === 'user' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {t('prompts.userPrompt')}
-                    </label>
-                    <button
-                      onClick={handleRefreshPreview}
-                      disabled={previewMutation.isPending}
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                    >
-                      <RotateCcw className={`w-3 h-3 ${previewMutation.isPending ? 'animate-spin' : ''}`} />
-                      {t('prompts.refreshPreview')}
-                    </button>
-                  </div>
-                  <textarea
-                    value={userPrompt}
-                    onChange={(e) => handleUserPromptChange(e.target.value)}
-                    className="w-full h-48 px-4 py-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 font-mono text-sm resize-none"
-                    placeholder={t('prompts.userPromptPlaceholder')}
-                  />
+              {/* Editor */}
+              <div>
+                <textarea
+                  value={currentPromptEdited}
+                  onChange={(e) => handlePromptChange(e.target.value)}
+                  className="w-full h-48 px-4 py-3 border rounded-lg bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  placeholder={activeTab === 'system' ? t('prompts.systemPromptPlaceholder') : t('prompts.userPromptPlaceholder')}
+                />
+              </div>
 
-                  {/* Rendered Preview */}
-                  <div className="mt-4">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                      {t('prompts.renderedPreview')}
-                    </label>
-                    <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
-                      <pre className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono">
-                        {previewMutation.data?.user_prompt || t('prompts.clickRefresh')}
-                      </pre>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'variables' && (
-                <div className="space-y-4">
+              {/* Rendered Preview */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {t('prompts.availableVariables')}
+                    {t('prompts.renderedPreview')}
                   </label>
-                  <div className="space-y-2">
-                    {template?.variables.map((variable) => (
-                      <div
-                        key={variable}
-                        className="flex items-start gap-4 p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700"
-                      >
-                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                          {`{{${variable}}}`}
-                        </code>
-                        <div className="flex-1 text-sm text-gray-600 dark:text-gray-400 break-all">
-                          {formatVariableValue(variables[variable])}
-                        </div>
-                      </div>
-                    ))}
-                    {(!template?.variables || template.variables.length === 0) && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {t('prompts.noVariables')}
-                      </p>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefreshPreview}
+                    disabled={previewMutation.isPending}
+                    className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${previewMutation.isPending ? 'animate-spin' : ''}`} />
+                    {t('prompts.refreshPreview')}
+                  </button>
                 </div>
-              )}
-            </>
+                <div className={`p-4 border rounded-lg max-h-40 overflow-auto ${
+                  activeTab === 'system'
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                }`}>
+                  {previewMutation.isPending ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">{t('prompts.loading')}</span>
+                    </div>
+                  ) : previewMutation.isError ? (
+                    <div className="text-red-600 dark:text-red-400 text-sm">
+                      {String(previewMutation.error)}
+                    </div>
+                  ) : currentPromptRendered ? (
+                    <pre className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono">
+                      {currentPromptRendered}
+                    </pre>
+                  ) : (
+                    <span className="text-sm text-gray-500">{t('prompts.clickRefresh')}</span>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleReset}
-              disabled={!isModified || saveMutation.isPending}
-              className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 disabled:opacity-50"
-            >
-              <RotateCcw className="w-4 h-4" />
-              {t('prompts.reset')}
-            </button>
-            <button
-              onClick={() => saveMutation.mutate()}
-              disabled={!isModified || saveMutation.isPending}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >
-              {saveMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : saveSuccess ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              {saveSuccess ? t('prompts.saved') : t('prompts.save')}
-            </button>
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            {isSystemEdited && (
+              <span className="flex items-center gap-1 px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                <FileText className="w-3 h-3" />
+                {t('prompts.systemModified')}
+              </span>
+            )}
+            {isUserEdited && (
+              <span className="flex items-center gap-1 px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                <Code className="w-3 h-3" />
+                {t('prompts.userModified')}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               {t('common.cancel')}
             </button>
             <button
+              type="button"
               onClick={handleConfirm}
-              disabled={templateLoading || isLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              disabled={isDataLoading || isLoading || !systemPromptRendered || !userPromptRendered}
+              className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -321,16 +502,4 @@ export function PromptPreviewModal({
       </div>
     </div>
   )
-}
-
-function formatVariableValue(value: unknown): string {
-  if (value === undefined || value === null) {
-    return '(empty)'
-  }
-  if (typeof value === 'object') {
-    const str = JSON.stringify(value, null, 2)
-    return str.length > 200 ? str.slice(0, 200) + '...' : str
-  }
-  const str = String(value)
-  return str.length > 200 ? str.slice(0, 200) + '...' : str
 }

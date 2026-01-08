@@ -1,4 +1,4 @@
-import { Check, BookOpen, Languages, FileCheck, Download } from 'lucide-react'
+import { Check, BookOpen, Languages, FileCheck, Download, Loader2 } from 'lucide-react'
 import { useTranslation } from '../../stores/appStore'
 
 interface Step {
@@ -7,11 +7,20 @@ interface Step {
   icon: React.ReactNode
 }
 
+interface TranslationProgressInfo {
+  hasTask: boolean
+  status?: string
+  progress: number
+  completedParagraphs: number
+  totalParagraphs: number
+}
+
 interface StepIndicatorProps {
   currentStep: string
   analysisCompleted: boolean
   translationCompleted: boolean
   proofreadingCompleted: boolean
+  translationProgress?: TranslationProgressInfo
   onStepClick?: (step: string) => void
 }
 
@@ -20,6 +29,7 @@ export function StepIndicator({
   analysisCompleted,
   translationCompleted,
   proofreadingCompleted,
+  translationProgress,
   onStepClick,
 }: StepIndicatorProps) {
   const { t } = useTranslation()
@@ -31,19 +41,44 @@ export function StepIndicator({
     { id: 'export', label: t('workflow.export'), icon: <Download className="w-5 h-5" /> },
   ]
 
-  const getStepStatus = (stepId: string): 'completed' | 'current' | 'upcoming' => {
-    // Only show completed (checkmark) if the step is confirmed AND we've moved past it
-    const stepOrder = ['analysis', 'translation', 'proofreading', 'export']
-    const currentIndex = stepOrder.indexOf(currentStep)
-    const stepIndex = stepOrder.indexOf(stepId)
+  // Status types:
+  // - completed: Step is fully done (green checkmark)
+  // - in_progress: Step is actively being processed (animated)
+  // - current: On this step but not processing
+  // - upcoming: Not accessible yet
+  const getStepStatus = (stepId: string): 'completed' | 'in_progress' | 'current' | 'upcoming' => {
+    // Analysis: completed when confirmed, regardless of current page
+    if (stepId === 'analysis') {
+      if (analysisCompleted) return 'completed'
+      if (currentStep === 'analysis') return 'current'
+      return 'upcoming'
+    }
 
-    // A step is completed only if:
-    // 1. It has been confirmed (analysisCompleted, etc.)
-    // 2. AND we are on a later step (not the current step)
-    if (stepId === 'analysis' && analysisCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === 'translation' && translationCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === 'proofreading' && proofreadingCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === currentStep) return 'current'
+    // Translation: completed when done, in_progress when has partial content
+    if (stepId === 'translation') {
+      if (translationCompleted) return 'completed'
+      // Check if translation is in progress (has partial content or actively processing)
+      if (translationProgress?.hasTask) {
+        const isProcessing = translationProgress.status === 'processing' || translationProgress.status === 'pending'
+        const hasPartialContent = translationProgress.completedParagraphs > 0
+        if (isProcessing || hasPartialContent) return 'in_progress'
+      }
+      if (currentStep === 'translation') return 'current'
+      return 'upcoming'
+    }
+
+    // Proofreading and Export: keep simple for now
+    if (stepId === 'proofreading') {
+      if (proofreadingCompleted) return 'completed'
+      if (currentStep === 'proofreading') return 'current'
+      return 'upcoming'
+    }
+
+    if (stepId === 'export') {
+      if (currentStep === 'export') return 'current'
+      return 'upcoming'
+    }
+
     return 'upcoming'
   }
 
@@ -76,8 +111,10 @@ export function StepIndicator({
               {index > 0 && (
                 <div
                   className={`absolute right-full w-16 h-0.5 -translate-y-1/2 top-1/2 ${
-                    status === 'completed' || getStepStatus(steps[index - 1].id) === 'completed'
+                    getStepStatus(steps[index - 1].id) === 'completed'
                       ? 'bg-blue-600 dark:bg-blue-500'
+                      : getStepStatus(steps[index - 1].id) === 'in_progress'
+                      ? 'bg-amber-400 dark:bg-amber-500'
                       : 'bg-gray-200 dark:bg-gray-700'
                   }`}
                 />
@@ -99,15 +136,19 @@ export function StepIndicator({
                     ${
                       status === 'completed'
                         ? 'bg-blue-600 border-blue-600 text-white'
+                        : status === 'in_progress'
+                        ? 'border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-900/20 animate-pulse'
                         : status === 'current'
                         ? 'border-blue-600 text-blue-600 bg-blue-50 dark:bg-blue-900/20'
                         : 'border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
                     }
-                    ${canClick && status !== 'completed' ? 'group-hover:border-blue-500 group-hover:text-blue-500' : ''}
+                    ${canClick && status !== 'completed' && status !== 'in_progress' ? 'group-hover:border-blue-500 group-hover:text-blue-500' : ''}
                   `}
                 >
                   {status === 'completed' ? (
                     <Check className="w-6 h-6" />
+                  ) : status === 'in_progress' ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     step.icon
                   )}
@@ -118,7 +159,9 @@ export function StepIndicator({
                   className={`
                     mt-2 text-sm font-medium whitespace-nowrap
                     ${
-                      status === 'current'
+                      status === 'in_progress'
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : status === 'current'
                         ? 'text-blue-600 dark:text-blue-400'
                         : status === 'completed'
                         ? 'text-gray-900 dark:text-gray-100'

@@ -4,7 +4,8 @@ This module provides the ContextBuilder class that constructs
 TranslationContext objects from database entities.
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,9 @@ from ..models.context import (
     TranslationContext,
     TranslationMode,
 )
+from app.core.prompts.loader import PromptLoader
+
+logger = logging.getLogger(__name__)
 
 
 class ContextBuilder:
@@ -91,7 +95,23 @@ class ContextBuilder:
         if mode == TranslationMode.OPTIMIZATION:
             existing = await self._get_existing_translation(paragraph)
 
-        # 5. Assemble final context
+        # 5. Load prompts from file system if custom prompts not provided
+        if not custom_system_prompt or not custom_user_prompt:
+            loaded_system, loaded_user = await self._load_prompts_from_files(
+                project=project,
+                mode=mode,
+                paragraph=paragraph,
+                book_analysis=book_analysis,
+                adjacent=adjacent,
+                existing=existing,
+            )
+            # Use loaded prompts if custom ones not provided
+            if not custom_system_prompt:
+                custom_system_prompt = loaded_system
+            if not custom_user_prompt:
+                custom_user_prompt = loaded_user
+
+        # 6. Assemble final context
         return TranslationContext(
             source=source,
             target_language="zh",
@@ -257,3 +277,207 @@ class ContextBuilder:
             )
 
         return None
+
+    async def _load_prompts_from_files(
+        self,
+        project,
+        mode: TranslationMode,
+        paragraph,
+        book_analysis: Optional[BookAnalysisContext],
+        adjacent: Optional[AdjacentContext],
+        existing: Optional[ExistingTranslation],
+    ) -> tuple[str, str]:
+        """Load and render prompts from file system templates.
+
+        Args:
+            project: Project model
+            mode: Translation mode
+            paragraph: Paragraph model
+            book_analysis: Book analysis context
+            adjacent: Adjacent context
+            existing: Existing translation
+
+        Returns:
+            Tuple of (rendered_system_prompt, rendered_user_prompt)
+        """
+        # Map mode to prompt type
+        prompt_type_map = {
+            TranslationMode.DIRECT: "translation",
+            TranslationMode.AUTHOR_AWARE: "translation",
+            TranslationMode.ITERATIVE: "translation",
+            TranslationMode.OPTIMIZATION: "optimization",
+        }
+        prompt_type = prompt_type_map.get(mode, "translation")
+
+        try:
+            # Load template from project configuration
+            template = PromptLoader.load_for_project(project.id, prompt_type)
+
+            # Build variables dictionary for template rendering
+            variables = self._build_template_variables(
+                project=project,
+                paragraph=paragraph,
+                book_analysis=book_analysis,
+                adjacent=adjacent,
+                existing=existing,
+                prompt_type=prompt_type,
+            )
+
+            # Render templates with variables
+            rendered_system = PromptLoader.render(
+                template.system_prompt,
+                variables
+            )
+            rendered_user = PromptLoader.render(
+                template.user_prompt_template,
+                variables
+            )
+
+            logger.info(
+                f"Loaded prompts from files for project {project.id}, "
+                f"type={prompt_type}, template={template.template_name}"
+            )
+
+            return rendered_system, rendered_user
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load prompts from files for project {project.id}: {e}. "
+                f"Falling back to empty prompts (strategy will use defaults)."
+            )
+            # Return empty strings to let strategy use its built-in prompts
+            return "", ""
+
+    def _build_template_variables(
+        self,
+        project,
+        paragraph,
+        book_analysis: Optional[BookAnalysisContext],
+        adjacent: Optional[AdjacentContext],
+        existing: Optional[ExistingTranslation],
+        prompt_type: str,
+    ) -> Dict[str, Any]:
+        """Build variables dictionary for template rendering.
+
+        Args:
+            project: Project model
+            paragraph: Paragraph model
+            book_analysis: Book analysis context
+            adjacent: Adjacent context
+            existing: Existing translation
+            prompt_type: Type of prompt (translation/optimization/etc)
+
+        Returns:
+            Dictionary with all template variables
+        """
+        variables: Dict[str, Any] = {}
+
+        # Project variables
+        variables["project"] = {
+            "title": getattr(project, "title", None) or getattr(project, "epub_title", ""),
+            "author": getattr(project, "author", None) or getattr(project, "epub_author", ""),
+            "author_background": getattr(project, "author_background", ""),
+            "source_language": getattr(project, "source_language", "en"),
+            "target_language": getattr(project, "target_language", "zh"),
+        }
+
+        # Content variables
+        variables["content"] = {
+            "source": paragraph.original_text,
+            "source_text": paragraph.original_text,  # legacy alias
+        }
+
+        # Add target for optimization/proofreading
+        if existing:
+            variables["content"]["target"] = existing.text
+            variables["content"]["translated_text"] = existing.text  # legacy alias
+
+        # Add chapter title if available
+        if hasattr(paragraph, "chapter") and paragraph.chapter:
+            variables["content"]["chapter_title"] = getattr(
+                paragraph.chapter, "title", ""
+            )
+
+        # Context variables (adjacent paragraphs)
+        if adjacent:
+            variables["context"] = {
+                "previous_source": adjacent.previous_original or "",
+                "previous_target": adjacent.previous_translation or "",
+            }
+
+        # Pipeline variables
+        variables["pipeline"] = {}
+        # Add existing translation under pipeline namespace too (legacy)
+        if existing:
+            variables["pipeline"]["existing_translation"] = existing.text
+
+        # Derived variables (from book analysis)
+        if book_analysis:
+            derived = {
+                "author_name": book_analysis.author_name,
+                "author_biography": book_analysis.author_biography,
+                "writing_style": book_analysis.writing_style,
+                "tone": book_analysis.tone,
+                "target_audience": book_analysis.target_audience,
+                "genre_conventions": book_analysis.genre_conventions,
+            }
+
+            # Format terminology as table
+            if book_analysis.key_terminology:
+                term_lines = [
+                    f"- {en}: {zh}"
+                    for en, zh in book_analysis.key_terminology.items()
+                ]
+                derived["terminology_table"] = "\n".join(term_lines)
+
+            # Translation principles
+            if book_analysis.translation_principles:
+                tp = book_analysis.translation_principles
+                derived["priority_order"] = tp.priority_order or []
+                derived["faithfulness_boundary"] = tp.faithfulness_boundary or ""
+                derived["permissible_adaptation"] = tp.permissible_adaptation or ""
+                derived["red_lines"] = tp.red_lines or ""
+                derived["style_constraints"] = tp.style_constraints or ""
+
+            # Custom guidelines
+            if book_analysis.custom_guidelines:
+                derived["custom_guidelines"] = book_analysis.custom_guidelines
+
+            # Boolean flags for conditionals
+            derived["has_analysis"] = True
+            derived["has_writing_style"] = bool(book_analysis.writing_style)
+            derived["has_tone"] = bool(book_analysis.tone)
+            derived["has_terminology"] = bool(book_analysis.key_terminology)
+            derived["has_target_audience"] = bool(book_analysis.target_audience)
+            derived["has_genre_conventions"] = bool(book_analysis.genre_conventions)
+            derived["has_translation_principles"] = bool(book_analysis.translation_principles)
+            derived["has_custom_guidelines"] = bool(book_analysis.custom_guidelines)
+            derived["has_style_constraints"] = bool(
+                book_analysis.translation_principles
+                and book_analysis.translation_principles.style_constraints
+            )
+
+            variables["derived"] = derived
+
+        # Meta variables
+        variables["meta"] = {
+            "word_count": len(paragraph.original_text.split()),
+            "char_count": len(paragraph.original_text),
+            "paragraph_index": paragraph.paragraph_number,
+            "stage": prompt_type,
+        }
+
+        # Add chapter index if available
+        if hasattr(paragraph, "chapter") and paragraph.chapter:
+            variables["meta"]["chapter_index"] = paragraph.chapter.chapter_number
+
+        # User-defined variables (load from project variables.json)
+        try:
+            user_vars = PromptLoader.load_project_variables(project.id)
+            if user_vars:
+                variables["user"] = user_vars
+        except Exception as e:
+            logger.debug(f"No user variables for project {project.id}: {e}")
+            variables["user"] = {}
+
+        return variables

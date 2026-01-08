@@ -81,12 +81,20 @@ export function ProjectLayout() {
   // Sync workflow status to global store for header display
   useEffect(() => {
     if (projectId && effectiveWorkflowStatus) {
+      const translationProgress = effectiveWorkflowStatus.translation_progress
       setWorkflowStatus({
         projectId,
         currentStep: currentStep as 'analysis' | 'translation' | 'proofreading' | 'export',
         analysisCompleted: effectiveWorkflowStatus.analysis_completed ?? false,
         translationCompleted: effectiveWorkflowStatus.translation_completed ?? false,
         proofreadingCompleted: effectiveWorkflowStatus.proofreading_completed ?? false,
+        translationProgress: translationProgress ? {
+          hasTask: translationProgress.has_task ?? false,
+          status: translationProgress.status,
+          progress: translationProgress.progress ?? 0,
+          completedParagraphs: translationProgress.completed_paragraphs ?? 0,
+          totalParagraphs: translationProgress.total_paragraphs ?? 0,
+        } : undefined,
       })
     }
   }, [projectId, currentStep, effectiveWorkflowStatus, setWorkflowStatus])

@@ -7,6 +7,7 @@ import { useTranslation } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
+import { AnalysisFieldCard } from '../../components/workflow/AnalysisFieldCard'
 
 interface OutletContext {
   project: Project
@@ -26,18 +27,17 @@ const STEP_LABELS: Record<string, string> = {
   warning: 'common.warning',
 }
 
-// Helper to format field names for display
-function formatFieldName(key: string): string {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-// Helper to render a value based on its type
-function renderValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'object') return JSON.stringify(value, null, 2)
-  return String(value)
+// Known field i18n keys mapping
+const FIELD_I18N_KEYS: Record<string, string> = {
+  author_bio: 'analysis.authorBio',
+  writing_style: 'analysis.writingStyle',
+  tone: 'analysis.tone',
+  target_audience: 'analysis.targetAudience',
+  genre_conventions: 'analysis.genreConventions',
+  key_terminology: 'analysis.keyTerminology',
+  terminology: 'analysis.keyTerminology',
+  themes: 'analysis.themes',
+  summary: 'analysis.summary',
 }
 
 export function AnalysisPage() {
@@ -55,7 +55,6 @@ export function AnalysisPage() {
 
   // Form state - stores the raw_analysis as editable form data
   const [formData, setFormData] = useState<Record<string, unknown>>({})
-  const [isDirty, setIsDirty] = useState(false)
 
   // Prompt preview state
   const [showPromptPreview, setShowPromptPreview] = useState(false)
@@ -97,6 +96,9 @@ export function AnalysisPage() {
     setIsAnalyzing(true)
     setProgressEvent(null)
     setAnalysisError(null)
+
+    // Reset analysis query to clear previous confirmed state
+    queryClient.setQueryData(['analysis', projectId], null)
 
     const stream = api.startAnalysisStream(
       projectId,
@@ -161,7 +163,6 @@ export function AnalysisPage() {
       })
       queryClient.invalidateQueries({ queryKey: ['analysis', projectId] })
       queryClient.invalidateQueries({ queryKey: ['workflow-status', projectId] })
-      setIsDirty(false)
     } finally {
       setIsSaving(false)
     }
@@ -181,11 +182,6 @@ export function AnalysisPage() {
       }
       return { ...prev, [key]: parsedValue }
     })
-    setIsDirty(true)
-  }
-
-  const handleSave = () => {
-    handleUpdateAnalysis(false)
   }
 
   const handleConfirm = () => {
@@ -205,28 +201,36 @@ export function AnalysisPage() {
 
   return (
     <div className="space-y-6">
-      {/* LLM Configuration */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      {/* Action Bar - unified format */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm border border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {t('analysis.llmConfig')}
+          {/* Left side: Title */}
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {t('workflow.analysis')}
             </h2>
+          </div>
+
+          {/* Right side: All action buttons */}
+          <div className="flex items-center gap-2">
+            {/* LLM Config selector */}
             <LLMConfigSelector />
+
+            {/* View prompt button */}
             <button
               onClick={() => setShowPromptPreview(true)}
               disabled={!hasLLMConfig}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm"
             >
               <FileText className="w-4 h-4" />
               {t('prompts.viewPrompt')}
             </button>
-          </div>
-          <div className="flex items-center gap-3">
+
+            {/* Analyze/Cancel button */}
             {isAnalyzing ? (
               <button
                 onClick={handleCancelAnalysis}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
               >
                 {t('common.cancel')}
               </button>
@@ -234,7 +238,7 @@ export function AnalysisPage() {
               <button
                 onClick={handleAnalyzeClick}
                 disabled={!hasLLMConfig || isAnalyzing}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
                 {hasAnalysis ? (
                   <RefreshCw className="w-4 h-4" />
@@ -244,11 +248,42 @@ export function AnalysisPage() {
                 {hasAnalysis ? t('analysis.reanalyze') : t('analysis.startAnalysis')}
               </button>
             )}
+
+            {/* Confirm button - only when has analysis */}
+            {hasAnalysis && (
+              <button
+                onClick={handleConfirm}
+                disabled={isSaving || analysis?.user_confirmed}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${
+                  analysis?.user_confirmed
+                    ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default'
+                    : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50'
+                }`}
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                {analysis?.user_confirmed ? t('analysis.confirmed') : t('analysis.confirmAnalysis')}
+              </button>
+            )}
+
+            {/* Continue button - only when confirmed */}
+            {analysis?.user_confirmed && (
+              <button
+                onClick={handleContinue}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+              >
+                {t('workflow.continueToTranslation')}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
         {analysisError && (
-          <p className="mt-4 text-sm text-red-600">
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
             {t('common.error')}: {analysisError}
           </p>
         )}
@@ -300,81 +335,27 @@ export function AnalysisPage() {
           <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
         </div>
       ) : hasAnalysis ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {t('analysis.results')}
-            </h2>
-            {analysis.user_confirmed && (
-              <span className="flex items-center gap-1 text-green-600 text-sm">
-                <Check className="w-4 h-4" />
-                {t('analysis.confirmed')}
-              </span>
-            )}
-          </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
+            {t('analysis.results')}
+          </h3>
 
-          {/* Dynamic fields rendering */}
-          <div className="space-y-6">
-            {analysisFields.map(([key, value]) => {
-              const isObject = typeof value === 'object' && value !== null
-              const displayValue = renderValue(value)
-
-              return (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {formatFieldName(key)}
-                  </label>
-                  <textarea
-                    value={displayValue}
-                    onChange={(e) => handleFieldChange(key, e.target.value)}
-                    rows={isObject ? 6 : 3}
-                    className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 ${
-                      isObject ? 'font-mono text-sm' : ''
-                    }`}
-                  />
-                </div>
-              )
-            })}
+          {/* Dynamic fields rendering with cards */}
+          <div className="space-y-4">
+            {analysisFields.map(([key, value]) => (
+              <AnalysisFieldCard
+                key={key}
+                fieldKey={key}
+                value={value}
+                onChange={handleFieldChange}
+                i18nKey={FIELD_I18N_KEYS[key]}
+              />
+            ))}
 
             {analysisFields.length === 0 && (
               <p className="text-gray-500 dark:text-gray-400 text-center py-4">
                 {t('analysis.noFields')}
               </p>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleSave}
-                disabled={!isDirty || isSaving}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-              >
-                {t('common.save')}
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={isSaving}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-              >
-                {isSaving ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Check className="w-4 h-4" />
-                )}
-                {t('analysis.confirmAnalysis')}
-              </button>
-            </div>
-
-            {analysis.user_confirmed && (
-              <button
-                onClick={handleContinue}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                {t('workflow.continueToTranslation')}
-                <ArrowRight className="w-4 h-4" />
-              </button>
             )}
           </div>
         </div>
@@ -395,9 +376,13 @@ export function AnalysisPage() {
         isOpen={showPromptPreview}
         onClose={() => setShowPromptPreview(false)}
         promptType="analysis"
+        projectId={projectId}
         variables={{
-          title: project?.name || '',
-          author: project?.author || 'Unknown',
+          project: {
+            title: project?.name || '',
+            author: project?.author || '',
+            author_background: '',
+          },
           sample_paragraphs: '(Sample paragraphs will be loaded during analysis)',
         }}
         onConfirm={handlePromptConfirm}

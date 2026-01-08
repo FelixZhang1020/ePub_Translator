@@ -55,6 +55,9 @@ class Project(Base):
     translation_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     proofreading_completed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # User preferences
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow

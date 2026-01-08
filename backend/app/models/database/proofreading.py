@@ -2,36 +2,24 @@
 
 import uuid
 from datetime import datetime
-from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Text, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import String, Text, Integer, Float, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database.base import Base
+from app.models.database.enums import ProofreadingStatus, SuggestionStatus, ImprovementLevel
+from app.models.database.mixins import ProgressTrackingMixin
+
+# Re-export for backwards compatibility
+__all__ = ["ProofreadingSession", "ProofreadingSuggestion", "ProofreadingStatus", "SuggestionStatus", "ImprovementLevel"]
 
 if TYPE_CHECKING:
     from app.models.database.project import Project
     from app.models.database.paragraph import Paragraph
 
 
-class ProofreadingStatus(str, Enum):
-    """Proofreading session status enum."""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class SuggestionStatus(str, Enum):
-    """Suggestion status enum."""
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
-    MODIFIED = "modified"
-
-
-class ProofreadingSession(Base):
+class ProofreadingSession(Base, ProgressTrackingMixin):
     """Proofreading session for tracking review cycles."""
 
     __tablename__ = "proofreading_sessions"
@@ -74,11 +62,6 @@ class ProofreadingSession(Base):
         "ProofreadingSuggestion", back_populates="session", cascade="all, delete-orphan"
     )
 
-    def update_progress(self):
-        """Update progress percentage based on completed paragraphs."""
-        if self.total_paragraphs > 0:
-            self.progress = self.completed_paragraphs / self.total_paragraphs
-
 
 class ProofreadingSuggestion(Base):
     """Individual proofreading suggestion for a paragraph."""
@@ -99,6 +82,14 @@ class ProofreadingSuggestion(Base):
     original_translation: Mapped[str] = mapped_column(Text, nullable=False)
     suggested_translation: Mapped[str] = mapped_column(Text, nullable=False)
     explanation: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Improvement assessment (from enhanced proofreading v2)
+    improvement_level: Mapped[Optional[str]] = mapped_column(
+        String(20), default=None
+    )  # none, optional, recommended, critical
+    issue_types: Mapped[Optional[list]] = mapped_column(
+        JSON, default=None
+    )  # ["accuracy", "naturalness", "modern_usage", "style_consistency", "readability"]
 
     # User action
     status: Mapped[str] = mapped_column(

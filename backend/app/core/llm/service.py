@@ -2,14 +2,12 @@
 
 import os
 import re
-from typing import AsyncIterator, Optional
+from typing import Optional
 from pydantic import BaseModel
 
 import litellm
-from litellm import acompletion, completion_cost, get_max_tokens
-
-from .adapter import TranslationRequest, TranslationResponse
-from app.core.prompts.loader import PromptLoader
+from litellm import acompletion
+from litellm.utils import get_max_tokens
 
 
 class ModelInfo(BaseModel):
@@ -561,140 +559,6 @@ class LLMService:
         """Get all models from LiteLLM's model_cost."""
         return list(litellm.model_cost.keys())
 
-    async def translate(
-        self,
-        model: str,
-        request: TranslationRequest,
-        api_key: Optional[str] = None,
-    ) -> TranslationResponse:
-        """Perform translation using specified model.
-
-        Args:
-            model: LiteLLM model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
-            request: Translation request
-            api_key: Optional API key override
-
-        Returns:
-            TranslationResponse with translated text and usage info
-        """
-        system_prompt = self._build_system_prompt(request)
-        user_prompt = self._build_user_prompt(request)
-
-        # Set API key if provided
-        kwargs = {}
-        actual_model = model
-        if api_key:
-            provider = self._get_provider_from_model(model)
-            if provider == "openai":
-                kwargs["api_key"] = api_key
-                # Ensure openai/ prefix for proper routing
-                if not model.startswith("openai/"):
-                    actual_model = f"openai/{model}"
-            elif provider == "anthropic":
-                kwargs["api_key"] = api_key
-            elif provider == "gemini":
-                kwargs["api_key"] = api_key
-                # Ensure gemini/ prefix for API key auth (not vertex_ai)
-                if not model.startswith("gemini/"):
-                    actual_model = f"gemini/{model}"
-            elif provider == "deepseek":
-                kwargs["api_key"] = api_key
-                # Ensure deepseek/ prefix for proper routing
-                if not model.startswith("deepseek/"):
-                    actual_model = f"deepseek/{model}"
-            elif provider == "qwen":
-                # Qwen uses DashScope - ensure dashscope/ prefix
-                kwargs["api_key"] = api_key
-                if not model.startswith("dashscope/"):
-                    actual_model = f"dashscope/{model}"
-
-        # Enforce: API key must be provided, never use env vars
-        if "api_key" not in kwargs:
-            raise ValueError("API key must be provided. Environment variables are not allowed.")
-
-        response = await acompletion(
-            model=actual_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
-        )
-
-        translated_text = response.choices[0].message.content
-        tokens_used = response.usage.total_tokens if response.usage else 0
-        provider = self._get_provider_from_model(model)
-
-        return TranslationResponse(
-            translated_text=translated_text,
-            tokens_used=tokens_used,
-            model=model,
-            provider=provider,
-        )
-
-    async def translate_stream(
-        self,
-        model: str,
-        request: TranslationRequest,
-        api_key: Optional[str] = None,
-    ) -> AsyncIterator[str]:
-        """Stream translation for real-time display.
-
-        Args:
-            model: LiteLLM model ID
-            request: Translation request
-            api_key: Optional API key override
-
-        Yields:
-            Chunks of translated text
-        """
-        system_prompt = self._build_system_prompt(request)
-        user_prompt = self._build_user_prompt(request)
-
-        kwargs = {"stream": True}
-        actual_model = model
-        if api_key:
-            provider = self._get_provider_from_model(model)
-            if provider == "openai":
-                kwargs["api_key"] = api_key
-                # Ensure openai/ prefix for proper routing
-                if not model.startswith("openai/"):
-                    actual_model = f"openai/{model}"
-            elif provider == "anthropic":
-                kwargs["api_key"] = api_key
-            elif provider == "gemini":
-                kwargs["api_key"] = api_key
-                # Ensure gemini/ prefix for API key auth (not vertex_ai)
-                if not model.startswith("gemini/"):
-                    actual_model = f"gemini/{model}"
-            elif provider == "deepseek":
-                kwargs["api_key"] = api_key
-                # Ensure deepseek/ prefix for proper routing
-                if not model.startswith("deepseek/"):
-                    actual_model = f"deepseek/{model}"
-            elif provider == "qwen":
-                # Qwen uses DashScope - ensure dashscope/ prefix
-                kwargs["api_key"] = api_key
-                if not model.startswith("dashscope/"):
-                    actual_model = f"dashscope/{model}"
-
-        # Enforce: API key must be provided, never use env vars
-        if "api_key" not in kwargs:
-            raise ValueError("API key must be provided. Environment variables are not allowed.")
-
-        response = await acompletion(
-            model=actual_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
-        )
-
-        async for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
     def estimate_cost(
         self,
         model: str,
@@ -809,55 +673,6 @@ class LLMService:
             else:
                 # Return a cleaned up error message
                 return False, error_msg[:100] if len(error_msg) > 100 else error_msg
-
-    def _build_system_prompt(self, request: TranslationRequest) -> str:
-        """Build system prompt based on translation mode.
-
-        Uses PromptLoader to load and render the prompt template.
-        """
-        # Use custom system prompt if provided
-        if request.custom_system_prompt:
-            return request.custom_system_prompt
-
-        # Select template based on mode
-        if request.mode == "optimization":
-            template = PromptLoader.load_template("optimization")
-        else:
-            template = PromptLoader.load_template("translation")
-
-        # Build variables for rendering
-        variables = {
-            "author_background": request.author_background,
-            "custom_prompts": request.custom_prompts,
-            "analysis_text": request.analysis_text,
-            "source_text": request.source_text,
-            "existing_translation": request.existing_translation,
-        }
-
-        return PromptLoader.render(template.system_prompt, variables)
-
-    def _build_user_prompt(self, request: TranslationRequest) -> str:
-        """Build user prompt with the text to translate.
-
-        Uses PromptLoader to load and render the user prompt template.
-        """
-        # Use custom user prompt if provided
-        if request.custom_user_prompt:
-            return request.custom_user_prompt
-
-        # Select template based on mode
-        if request.mode == "optimization":
-            template = PromptLoader.load_template("optimization")
-        else:
-            template = PromptLoader.load_template("translation")
-
-        # Build variables for rendering
-        variables = {
-            "source_text": request.source_text,
-            "existing_translation": request.existing_translation,
-        }
-
-        return PromptLoader.render(template.user_prompt_template, variables)
 
 
 # Global service instance

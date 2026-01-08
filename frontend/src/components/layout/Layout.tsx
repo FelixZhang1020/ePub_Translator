@@ -22,19 +22,44 @@ function HeaderStepIndicator({
     { id: 'export', icon: Download, label: t('workflow.export') },
   ]
 
-  const getStepStatus = (stepId: string): 'completed' | 'current' | 'upcoming' => {
-    // Only show completed (checkmark) if the step is confirmed AND we've moved past it
-    const stepOrder = ['analysis', 'translation', 'proofreading', 'export']
-    const currentIndex = stepOrder.indexOf(status.currentStep)
-    const stepIndex = stepOrder.indexOf(stepId)
+  // Status types:
+  // - completed: Step is fully done (green checkmark)
+  // - in_progress: Step is actively being processed (animated)
+  // - current: On this step but not processing
+  // - upcoming: Not accessible yet
+  const getStepStatus = (stepId: string): 'completed' | 'in_progress' | 'current' | 'upcoming' => {
+    // Analysis: completed when confirmed, regardless of current page
+    if (stepId === 'analysis') {
+      if (status.analysisCompleted) return 'completed'
+      if (status.currentStep === 'analysis') return 'current'
+      return 'upcoming'
+    }
 
-    // A step is completed only if:
-    // 1. It has been confirmed (analysisCompleted, etc.)
-    // 2. AND we are on a later step (not the current step)
-    if (stepId === 'analysis' && status.analysisCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === 'translation' && status.translationCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === 'proofreading' && status.proofreadingCompleted && stepIndex < currentIndex) return 'completed'
-    if (stepId === status.currentStep) return 'current'
+    // Translation: completed when done, in_progress when has partial content
+    if (stepId === 'translation') {
+      if (status.translationCompleted) return 'completed'
+      // Check if translation is in progress (has partial content or actively processing)
+      if (status.translationProgress?.hasTask) {
+        const isProcessing = status.translationProgress.status === 'processing' || status.translationProgress.status === 'pending'
+        const hasPartialContent = status.translationProgress.completedParagraphs > 0
+        if (isProcessing || hasPartialContent) return 'in_progress'
+      }
+      if (status.currentStep === 'translation') return 'current'
+      return 'upcoming'
+    }
+
+    // Proofreading and Export: keep simple for now
+    if (stepId === 'proofreading') {
+      if (status.proofreadingCompleted) return 'completed'
+      if (status.currentStep === 'proofreading') return 'current'
+      return 'upcoming'
+    }
+
+    if (stepId === 'export') {
+      if (status.currentStep === 'export') return 'current'
+      return 'upcoming'
+    }
+
     return 'upcoming'
   }
 
@@ -61,8 +86,10 @@ function HeaderStepIndicator({
             {/* Connector line */}
             {index > 0 && (
               <div className={`w-6 h-0.5 ${
-                stepStatus === 'completed' || getStepStatus(steps[index - 1].id) === 'completed'
+                getStepStatus(steps[index - 1].id) === 'completed'
                   ? 'bg-blue-500'
+                  : getStepStatus(steps[index - 1].id) === 'in_progress'
+                  ? 'bg-amber-400'
                   : 'bg-gray-300 dark:bg-gray-600'
               }`} />
             )}
@@ -82,15 +109,19 @@ function HeaderStepIndicator({
                   w-7 h-7 rounded-full flex items-center justify-center transition-all
                   ${stepStatus === 'completed'
                     ? 'bg-blue-600 text-white'
+                    : stepStatus === 'in_progress'
+                    ? 'border-2 border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-900/30 animate-pulse'
                     : stepStatus === 'current'
                     ? 'border-2 border-blue-600 text-blue-600 bg-blue-50 dark:bg-blue-900/30'
                     : 'border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
                   }
-                  ${canClick && stepStatus !== 'completed' ? 'group-hover:border-blue-500 group-hover:text-blue-500' : ''}
+                  ${canClick && stepStatus !== 'completed' && stepStatus !== 'in_progress' ? 'group-hover:border-blue-500 group-hover:text-blue-500' : ''}
                 `}
               >
                 {stepStatus === 'completed' ? (
                   <Check className="w-3.5 h-3.5" />
+                ) : stepStatus === 'in_progress' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Icon className="w-3.5 h-3.5" />
                 )}
@@ -99,7 +130,9 @@ function HeaderStepIndicator({
               <span
                 className={`
                   text-[10px] font-medium whitespace-nowrap
-                  ${stepStatus === 'current'
+                  ${stepStatus === 'in_progress'
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : stepStatus === 'current'
                     ? 'text-blue-600 dark:text-blue-400'
                     : stepStatus === 'completed'
                     ? 'text-gray-700 dark:text-gray-300'
@@ -162,9 +195,9 @@ export function Layout({ children }: LayoutProps) {
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200 flex-shrink-0">
         <div className={`mx-auto ${isTranslatePage ? 'w-[90%]' : 'max-w-7xl px-4 sm:px-6 lg:px-8'}`}>
-          <div className="relative flex justify-between items-center h-14">
+          <div className="flex items-center h-14">
             {/* Left: Logo */}
-            <div className="flex items-center">
+            <div className="flex items-center flex-shrink-0">
               <Link to="/" className="flex items-center gap-2">
                 <BookOpen className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 <span className={`${fontClasses.title} font-semibold text-gray-900 dark:text-white`}>
@@ -173,9 +206,11 @@ export function Layout({ children }: LayoutProps) {
               </Link>
             </div>
 
-            {/* Center: Workflow Step Indicator + Translation Progress */}
-            {isInProject && (workflowStatus || translationProgress) && (
-              <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+            {/* Center: Spacer with workflow indicator - flex-1 keeps nav position stable */}
+            <div className="flex-1 flex justify-center items-center">
+              {/* Workflow Step Indicator + Translation Progress */}
+              {isInProject && (workflowStatus || translationProgress) && (
+                <div className="flex items-center gap-3">
                 {/* Workflow Step Indicator */}
                 {workflowStatus && (
                   <HeaderStepIndicator status={workflowStatus} onStepClick={handleStepClick} />
@@ -199,11 +234,12 @@ export function Layout({ children }: LayoutProps) {
                     </span>
                   </div>
                 )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
 
             {/* Right: Navigation + Controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {/* Navigation */}
               <nav className="flex items-center gap-1 mr-4">
                 {navItems.map(({ path, labelKey, icon: Icon }) => (

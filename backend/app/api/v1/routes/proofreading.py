@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db
+from app.models.schemas import LLMTaskRequest
 from app.core.proofreading.service import proofreading_service
 from app.core.llm.config_service import LLMConfigService
 
@@ -14,18 +15,10 @@ from app.core.llm.config_service import LLMConfigService
 router = APIRouter()
 
 
-class StartProofreadingRequest(BaseModel):
+class StartProofreadingRequest(LLMTaskRequest):
     """Request to start a proofreading session."""
-    # Option 1: Use stored config (recommended)
-    config_id: Optional[str] = None
-    # Option 2: Direct parameters (for debugging/backwards compatibility)
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    provider: Optional[str] = None
-    # Proofreading options
+
     chapter_ids: Optional[list[str]] = None
-    custom_system_prompt: Optional[str] = None
-    custom_user_prompt: Optional[str] = None
 
 
 class ProofreadingSessionResponse(BaseModel):

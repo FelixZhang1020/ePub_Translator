@@ -3,8 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { HomePage } from './pages/HomePage'
 import { UploadPage } from './pages/UploadPage'
-import { TranslatePage } from './pages/TranslatePage'
-import { PreviewPage } from './pages/PreviewPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { PromptManagementPage } from './pages/PromptManagementPage'
 import { ProjectLayout } from './pages/workflow/ProjectLayout'
@@ -40,9 +38,6 @@ function App() {
             <Route path="export" element={<ExportPage />} />
           </Route>
 
-          {/* Legacy routes (keep for backwards compatibility) */}
-          <Route path="/translate/:projectId" element={<TranslatePage />} />
-          <Route path="/preview/:projectId" element={<PreviewPage />} />
           <Route path="/prompts" element={<PromptManagementPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>

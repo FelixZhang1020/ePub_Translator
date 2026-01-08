@@ -8,7 +8,6 @@ from app.models.database.translation import Translation, TranslationTask
 from app.models.database.book_analysis import BookAnalysis
 from app.models.database.reference_epub import ReferenceEPUB
 from app.models.database.paragraph_match import ParagraphMatch
-from app.models.database.translation_reasoning import TranslationReasoning
 from app.models.database.translation_conversation import (
     TranslationConversation,
     ConversationMessage,
@@ -16,21 +15,28 @@ from app.models.database.translation_conversation import (
 from app.models.database.proofreading import (
     ProofreadingSession,
     ProofreadingSuggestion,
-    ProofreadingStatus,
-    SuggestionStatus,
 )
 from app.models.database.llm_configuration import LLMConfiguration
 from app.models.database.prompt_template import (
     PromptTemplate,
     ProjectPromptConfig,
-    PromptCategory,
-    ProjectVariable,
-    VariableType,
 )
+# Centralized enums
+from app.models.database.enums import (
+    TranslationMode,
+    TaskStatus,
+    ProofreadingStatus,
+    SuggestionStatus,
+    ImprovementLevel,
+    PromptCategory,
+)
+# NOTE: ProjectVariable and VariableType removed - variables are now file-based
 
 __all__ = [
+    # Base
     "Base",
     "get_db",
+    # Models
     "Project",
     "Chapter",
     "Paragraph",
@@ -39,17 +45,18 @@ __all__ = [
     "BookAnalysis",
     "ReferenceEPUB",
     "ParagraphMatch",
-    "TranslationReasoning",
     "TranslationConversation",
     "ConversationMessage",
     "ProofreadingSession",
     "ProofreadingSuggestion",
-    "ProofreadingStatus",
-    "SuggestionStatus",
     "LLMConfiguration",
     "PromptTemplate",
     "ProjectPromptConfig",
+    # Enums
+    "TranslationMode",
+    "TaskStatus",
+    "ProofreadingStatus",
+    "SuggestionStatus",
+    "ImprovementLevel",
     "PromptCategory",
-    "ProjectVariable",
-    "VariableType",
 ]

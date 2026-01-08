@@ -11,6 +11,7 @@ export interface Project {
   status: string
   total_chapters: number
   total_paragraphs: number
+  is_favorite: boolean
   created_at: string
 }
 
@@ -220,23 +221,6 @@ export interface ReferenceSearchResponse {
   results: ReferenceSearchResultItem[]
 }
 
-// Translation Reasoning types
-export interface TranslationReasoning {
-  translation_id: string
-  reasoning_text: string
-  provider: string
-  model: string
-}
-
-export interface ReasoningRequest {
-  // Option 1: Use stored config (recommended)
-  config_id?: string
-  // Option 2: Direct parameters (for backwards compatibility)
-  model?: string
-  api_key?: string
-  provider?: string
-}
-
 // Translation Conversation types
 export interface ConversationMessage {
   id: string
@@ -433,63 +417,56 @@ export interface PromptPreview {
   user_prompt: string
 }
 
-// Prompt Template types (database-backed)
+// Prompt Template types (filesystem-based)
 export interface PromptTemplateDB {
-  id: string
-  name: string
-  description: string | null
   category: string
-  system_prompt: string
-  default_user_prompt: string | null
-  variables: string[] | null
-  is_builtin: boolean
-  is_default: boolean
-  created_at: string
-  updated_at: string
+  template_name: string  // e.g., 'default', 'reformed-theology'
+  display_name: string   // e.g., 'Default', 'Reformed Theology'
+  system_prompt: string  // Loaded from file
+  user_prompt: string    // Loaded from file
+  variables: string[]    // Extracted from templates
+  last_modified: string
 }
 
 export interface CreatePromptTemplateRequest {
   name: string
   description?: string
   category: string
-  system_prompt: string
-  default_user_prompt?: string
-  variables?: string[]
-  is_default?: boolean
+  template_name: string  // User-provided filename (e.g., 'reformed-theology')
+  system_prompt: string  // Content to save to file
 }
 
 export interface UpdatePromptTemplateRequest {
-  name?: string
-  description?: string
-  system_prompt?: string
-  default_user_prompt?: string
-  variables?: string[]
-  is_default?: boolean
+  system_prompt?: string  // If provided, saves to file
+  display_name?: string   // Custom display name (stored in metadata.json)
 }
 
 export interface ProjectPromptConfig {
   id: string
   project_id: string
   category: string
-  template_id: string | null
-  custom_system_prompt: string | null
-  custom_user_prompt: string | null
-  use_custom_system: boolean
-  use_custom_user: boolean
-  created_at: string
-  updated_at: string
-  template?: PromptTemplateDB | null
+  template_name: string
+  has_custom_user_prompt: boolean  // Whether project has custom user prompt file
+  resolved_system_prompt: string   // Loaded from global template
+  resolved_user_prompt: string     // Loaded from project file or global template
 }
 
 export interface ProjectPromptConfigRequest {
-  template_id?: string | null
-  custom_system_prompt?: string
-  custom_user_prompt?: string
-  use_custom_system?: boolean
-  use_custom_user?: boolean
+  template_name?: string
+  custom_user_prompt?: string  // If provided, saves to project file
 }
 
-// Project Variables types
+// Project Variables (file-based: projects/{project_id}/variables.json)
+export interface ProjectVariables {
+  project_id: string
+  variables: Record<string, unknown>  // Key-value pairs from variables.json
+}
+
+export interface ProjectVariablesRequest {
+  variables: Record<string, unknown>  // Key-value pairs to save
+}
+
+// Legacy interface for compatibility in UI (mapped from file-based storage)
 export interface ProjectVariable {
   id: string
   project_id: string
@@ -554,6 +531,11 @@ export const api = {
 
   async deleteProject(id: string): Promise<void> {
     await client.delete(`/projects/${id}`)
+  },
+
+  async toggleFavorite(id: string): Promise<{ id: string; is_favorite: boolean }> {
+    const { data } = await client.post(`/projects/${id}/favorite`)
+    return data
   },
 
   // Translation
@@ -703,6 +685,16 @@ export const api = {
 
   async getResumePosition(projectId: string): Promise<ResumePosition> {
     const { data } = await client.get(`/workflow/${projectId}/resume`)
+    return data
+  },
+
+  async confirmTranslation(projectId: string): Promise<{ project_id: string; translation_completed: boolean; current_step: string }> {
+    const { data } = await client.post(`/workflow/${projectId}/confirm-translation`)
+    return data
+  },
+
+  async resetTranslationStatus(projectId: string): Promise<{ project_id: string; translation_completed: boolean; current_step: string }> {
+    const { data } = await client.post(`/workflow/${projectId}/reset-translation-status`)
     return data
   },
 
@@ -876,17 +868,6 @@ export const api = {
     return data
   },
 
-  // Translation Reasoning
-  async requestReasoning(translationId: string, request: ReasoningRequest): Promise<TranslationReasoning> {
-    const { data } = await client.post(`/translation/reasoning/${translationId}`, request)
-    return data
-  },
-
-  async getReasoning(translationId: string): Promise<TranslationReasoning> {
-    const { data } = await client.get(`/translation/reasoning/${translationId}`)
-    return data
-  },
-
   // Translation Conversation
   async startConversation(translationId: string, request: StartConversationRequest): Promise<Conversation> {
     const { data } = await client.post(`/translation/conversation/${translationId}/start`, request)
@@ -982,16 +963,15 @@ export const api = {
     return data
   },
 
-  // Prompts
-  async getPromptTemplate(promptType: string): Promise<PromptTemplate> {
+  // Legacy Prompts (file-based, simple endpoint)
+  async getLegacyPromptTemplate(promptType: string): Promise<PromptTemplate> {
     const { data } = await client.get(`/prompts/${promptType}`)
     return data
   },
 
-  async updatePromptTemplate(promptType: string, systemPrompt: string, userPrompt: string): Promise<PromptTemplate> {
+  async updateLegacyPromptTemplate(promptType: string, systemPrompt: string): Promise<PromptTemplate> {
     const { data } = await client.put(`/prompts/${promptType}`, {
       system_prompt: systemPrompt,
-      user_prompt: userPrompt,
     })
     return data
   },
@@ -1010,7 +990,47 @@ export const api = {
     return data
   },
 
-  // Prompt Templates (database-backed)
+  // File-based Prompt Templates (new architecture)
+  async listFileTemplates(category: string): Promise<{ category: string; templates: string[] }> {
+    const { data } = await client.get(`/prompts/file-templates/${category}`)
+    return data
+  },
+
+  async getFileTemplate(
+    category: string,
+    templateName: string,
+    projectId?: string
+  ): Promise<{
+    type: string
+    template_name: string
+    system_prompt: string
+    user_prompt: string
+    variables: string[]
+    last_modified: string
+  }> {
+    const { data } = await client.get(`/prompts/file-templates/${category}/${templateName}`, {
+      params: projectId ? { project_id: projectId } : undefined,
+    })
+    return data
+  },
+
+  async getProjectResolvedPrompts(
+    projectId: string,
+    category: string
+  ): Promise<{
+    project_id: string
+    category: string
+    template_name: string
+    has_project_user_prompt: boolean
+    system_prompt: string
+    user_prompt: string
+    variables: string[]
+  }> {
+    const { data } = await client.get(`/prompts/project-resolved/${projectId}/${category}`)
+    return data
+  },
+
+  // Prompt Templates (filesystem-based)
   async getPromptTemplates(category?: string): Promise<PromptTemplateDB[]> {
     const { data } = await client.get('/prompts/templates', {
       params: category ? { category } : undefined,
@@ -1018,8 +1038,8 @@ export const api = {
     return data
   },
 
-  async getPromptTemplateById(templateId: string): Promise<PromptTemplateDB> {
-    const { data } = await client.get(`/prompts/templates/${templateId}`)
+  async getPromptTemplate(category: string, templateName: string): Promise<PromptTemplateDB> {
+    const { data } = await client.get(`/prompts/templates/${category}/${templateName}`)
     return data
   },
 
@@ -1028,17 +1048,33 @@ export const api = {
     return data
   },
 
-  async updatePromptTemplateById(templateId: string, request: UpdatePromptTemplateRequest): Promise<PromptTemplateDB> {
-    const { data } = await client.put(`/prompts/templates/${templateId}`, request)
+  async updatePromptTemplate(category: string, templateName: string, request: UpdatePromptTemplateRequest): Promise<PromptTemplateDB> {
+    const { data } = await client.put(`/prompts/templates/${category}/${templateName}`, request)
     return data
   },
 
-  async deletePromptTemplate(templateId: string): Promise<void> {
-    await client.delete(`/prompts/templates/${templateId}`)
+  async deletePromptTemplate(category: string, templateName: string): Promise<void> {
+    await client.delete(`/prompts/templates/${category}/${templateName}`)
   },
 
-  async syncBuiltinTemplates(): Promise<{ synced: number; templates: PromptTemplateDB[] }> {
-    const { data } = await client.post('/prompts/sync-builtin')
+  async renamePromptTemplate(category: string, templateName: string, newName: string): Promise<PromptTemplateDB> {
+    const { data } = await client.post(`/prompts/templates/${category}/${templateName}/rename`, { new_name: newName })
+    return data
+  },
+
+  // Default Template Management
+  async getDefaultTemplates(): Promise<{ defaults: Record<string, string> }> {
+    const { data } = await client.get('/prompts/defaults')
+    return data
+  },
+
+  async getDefaultTemplate(category: string): Promise<{ category: string; template_name: string }> {
+    const { data } = await client.get(`/prompts/defaults/${category}`)
+    return data
+  },
+
+  async setDefaultTemplate(category: string, templateName: string): Promise<{ category: string; template_name: string; message: string }> {
+    const { data } = await client.put(`/prompts/defaults/${category}`, { template_name: templateName })
     return data
   },
 
@@ -1062,24 +1098,76 @@ export const api = {
     await client.delete(`/prompts/projects/${projectId}/${category}`)
   },
 
-  // Project Variables
-  async getProjectVariables(projectId: string): Promise<ProjectVariable[]> {
-    const { data } = await client.get(`/prompts/projects/${projectId}/variables`)
+  async resetProjectUserPrompt(projectId: string, category: string): Promise<ProjectPromptConfig> {
+    const { data } = await client.delete(`/prompts/projects/${projectId}/${category}/user-prompt`)
     return data
+  },
+
+  // Project Variables (file-based: projects/{project_id}/variables.json)
+  // API returns { project_id, variables: {...} }, we convert to array for UI compatibility
+  async getProjectVariables(projectId: string): Promise<ProjectVariable[]> {
+    const { data } = await client.get<ProjectVariables>(`/prompts/projects/${projectId}/variables`)
+    // Convert file-based format to array of ProjectVariable for UI compatibility
+    const variables: ProjectVariable[] = []
+    for (const [name, value] of Object.entries(data.variables || {})) {
+      const valueType = typeof value === 'object' ? 'json' : typeof value as 'string' | 'number' | 'boolean'
+      variables.push({
+        id: name, // Use name as ID since file-based has no DB IDs
+        project_id: projectId,
+        name,
+        value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+        value_type: valueType,
+        description: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    }
+    return variables
   },
 
   async createProjectVariable(projectId: string, request: CreateProjectVariableRequest): Promise<ProjectVariable> {
-    const { data } = await client.post(`/prompts/projects/${projectId}/variables`, request)
-    return data
+    // Get current variables, add new one, save all
+    const { data: current } = await client.get<ProjectVariables>(`/prompts/projects/${projectId}/variables`)
+    const variables = { ...current.variables, [request.name]: request.value }
+    await client.put(`/prompts/projects/${projectId}/variables`, { variables })
+    return {
+      id: request.name,
+      project_id: projectId,
+      name: request.name,
+      value: request.value,
+      value_type: request.value_type || 'string',
+      description: request.description || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
   },
 
   async updateProjectVariable(projectId: string, variableName: string, request: UpdateProjectVariableRequest): Promise<ProjectVariable> {
-    const { data } = await client.put(`/prompts/projects/${projectId}/variables/${variableName}`, request)
-    return data
+    // Get current variables, update one, save all
+    const { data: current } = await client.get<ProjectVariables>(`/prompts/projects/${projectId}/variables`)
+    const variables = { ...current.variables }
+    if (request.value !== undefined) {
+      variables[variableName] = request.value
+    }
+    await client.put(`/prompts/projects/${projectId}/variables`, { variables })
+    return {
+      id: variableName,
+      project_id: projectId,
+      name: variableName,
+      value: request.value || String(current.variables[variableName] || ''),
+      value_type: request.value_type || 'string',
+      description: request.description || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
   },
 
   async deleteProjectVariable(projectId: string, variableName: string): Promise<void> {
-    await client.delete(`/prompts/projects/${projectId}/variables/${variableName}`)
+    // Get current variables, remove one, save all
+    const { data: current } = await client.get<ProjectVariables>(`/prompts/projects/${projectId}/variables`)
+    const variables = { ...current.variables }
+    delete variables[variableName]
+    await client.put(`/prompts/projects/${projectId}/variables`, { variables })
   },
 
   // Available Variables

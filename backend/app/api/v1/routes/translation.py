@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.database import get_db, Project, TranslationTask, TranslationReasoning
+from app.models.database import get_db, Project, TranslationTask
 from app.models.database.translation import TaskStatus, Translation
 from app.models.database.translation_conversation import (
     TranslationConversation,
@@ -19,7 +19,6 @@ from app.models.database.translation_conversation import (
 from app.models.database.paragraph import Paragraph
 from app.models.database.chapter import Chapter
 from app.core.translation.orchestrator import TranslationOrchestrator
-from app.core.llm.service import LLMService
 from app.core.llm.config_service import LLMConfigService
 from app.core.prompts.loader import PromptLoader
 from app.core.llm.prompts import CONVERSATION_SYSTEM_PROMPT
@@ -50,8 +49,8 @@ class StartTranslationRequest(BaseModel):
     api_key: Optional[str] = None  # API key for the provider
     # Translation options
     author_background: Optional[str] = None
-    custom_prompts: Optional[list[str]] = None
     chapters: Optional[list[int]] = None  # None = all chapters
+    # Custom prompts (override file-based prompts for this session)
     custom_system_prompt: Optional[str] = None
     custom_user_prompt: Optional[str] = None
 
@@ -101,8 +100,11 @@ async def start_translation(
     # Update project with author context if provided
     if request.author_background:
         project.author_background = request.author_background
-    if request.custom_prompts:
-        project.custom_prompts = request.custom_prompts
+
+    # Reset translation_completed when starting new translation
+    if project.translation_completed:
+        project.translation_completed = False
+        project.current_step = "translation"
 
     # Calculate total paragraphs based on selected chapters
     if request.chapters:
@@ -121,6 +123,7 @@ async def start_translation(
         total_paragraphs = project.total_paragraphs
 
     # Create translation task
+    # NOTE: Prompts are now loaded from files via PromptLoader, not passed in request
     task = TranslationTask(
         project_id=request.project_id,
         mode=request.mode,
@@ -130,9 +133,6 @@ async def start_translation(
         total_paragraphs=total_paragraphs,
         author_context={
             "background": request.author_background,
-            "prompts": request.custom_prompts,
-            "custom_system_prompt": request.custom_system_prompt,
-            "custom_user_prompt": request.custom_user_prompt,
         },
         selected_chapters=request.chapters,
     )
@@ -145,6 +145,8 @@ async def start_translation(
         await LLMConfigService.update_last_used(db, llm_config.config_id)
 
     # Start translation in background
+    # Prompts are loaded from files by PromptLoader inside the orchestrator
+    # Custom prompts from request override file-based prompts for this session
     orchestrator = TranslationOrchestrator(
         task_id=task.id,
         provider=llm_config.provider,
@@ -350,16 +352,11 @@ async def clear_chapter_translations(
     translation_ids = [row[0] for row in result.fetchall()]
 
     if translation_ids:
-        # First delete related records (conversations and reasonings)
+        # First delete related records (conversations)
         delete_conv_stmt = delete(TranslationConversation).where(
             TranslationConversation.translation_id.in_(translation_ids)
         )
         await db.execute(delete_conv_stmt)
-
-        delete_reasoning_stmt = delete(TranslationReasoning).where(
-            TranslationReasoning.translation_id.in_(translation_ids)
-        )
-        await db.execute(delete_reasoning_stmt)
 
     # Now delete the translations themselves
     delete_stmt = delete(Translation).where(
@@ -371,152 +368,6 @@ async def clear_chapter_translations(
     await db.commit()
 
     return {"deleted_count": deleted_count, "chapter_id": chapter_id}
-
-
-class ReasoningRequest(BaseModel):
-    """Request for translation reasoning."""
-    # Option 1: Use stored config (recommended)
-    config_id: Optional[str] = None
-    # Option 2: Direct parameters (for debugging/backwards compatibility)
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    provider: Optional[str] = None
-
-
-class ReasoningResponse(BaseModel):
-    """Response with translation reasoning."""
-    translation_id: str
-    reasoning_text: str
-    provider: str
-    model: str
-
-
-@router.post("/translation/reasoning/{translation_id}")
-async def request_reasoning(
-    translation_id: str,
-    request: ReasoningRequest,
-    db: AsyncSession = Depends(get_db),
-) -> ReasoningResponse:
-    """Request reasoning for a translation (on-demand).
-
-    This generates an explanation for why the translation was made.
-
-    Supports two ways to specify LLM configuration:
-    1. config_id: Reference a stored configuration (recommended)
-    2. provider + model + api_key: Direct parameters (for debugging)
-    """
-    # Resolve LLM configuration
-    try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # Get translation with paragraph
-    result = await db.execute(
-        select(Translation)
-        .options(selectinload(Translation.paragraph))
-        .where(Translation.id == translation_id)
-    )
-    translation = result.scalar_one_or_none()
-    if not translation:
-        raise HTTPException(status_code=404, detail="Translation not found")
-
-    # Check if reasoning already exists
-    result = await db.execute(
-        select(TranslationReasoning).where(
-            TranslationReasoning.translation_id == translation_id
-        )
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        return ReasoningResponse(
-            translation_id=translation_id,
-            reasoning_text=existing.reasoning_text,
-            provider=existing.provider,
-            model=existing.model,
-        )
-
-    # Build prompts using PromptLoader
-    template = PromptLoader.load_template("reasoning")
-    variables = {
-        "original_text": translation.paragraph.original_text,
-        "translated_text": translation.translated_text,
-    }
-    system_prompt = PromptLoader.render(template.system_prompt, variables)
-    user_prompt = PromptLoader.render(template.user_prompt_template, variables)
-
-    # Build kwargs for LiteLLM
-    kwargs = {"api_key": llm_config.api_key}
-    if llm_config.base_url:
-        kwargs["api_base"] = llm_config.base_url
-
-    try:
-        response = await acompletion(
-            model=llm_config.get_litellm_model(),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
-        )
-
-        reasoning_text = response.choices[0].message.content
-        tokens_used = response.usage.total_tokens if response.usage else 0
-
-        # Update last used timestamp if using stored config
-        if llm_config.config_id:
-            await LLMConfigService.update_last_used(db, llm_config.config_id)
-
-        # Save reasoning
-        reasoning = TranslationReasoning(
-            id=str(uuid.uuid4()),
-            translation_id=translation_id,
-            reasoning_text=reasoning_text,
-            provider=llm_config.provider,
-            model=llm_config.model,
-            tokens_used=tokens_used,
-        )
-        db.add(reasoning)
-        await db.commit()
-
-        return ReasoningResponse(
-            translation_id=translation_id,
-            reasoning_text=reasoning_text,
-            provider=llm_config.provider,
-            model=llm_config.model,
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}")
-
-
-@router.get("/translation/reasoning/{translation_id}")
-async def get_reasoning(
-    translation_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> ReasoningResponse:
-    """Get existing reasoning for a translation."""
-    result = await db.execute(
-        select(TranslationReasoning).where(
-            TranslationReasoning.translation_id == translation_id
-        )
-    )
-    reasoning = result.scalar_one_or_none()
-    if not reasoning:
-        raise HTTPException(status_code=404, detail="No reasoning found for this translation")
-
-    return ReasoningResponse(
-        translation_id=translation_id,
-        reasoning_text=reasoning.reasoning_text,
-        provider=reasoning.provider,
-        model=reasoning.model,
-    )
 
 
 # =============================================================================

@@ -1,6 +1,5 @@
 """Prompt management API routes."""
 
-import json
 import uuid
 from typing import Any, Optional, List
 
@@ -9,14 +8,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.prompts.loader import PromptLoader, PromptTemplate as FilePromptTemplate
+from app.core.prompts.loader import (
+    PromptLoader,
+    PromptTemplate as FilePromptTemplate,
+)
 from app.models.database import (
     get_db,
-    PromptTemplate as DBPromptTemplate,
     ProjectPromptConfig,
     PromptCategory,
-    ProjectVariable,
-    VariableType,
 )
 
 router = APIRouter()
@@ -27,22 +26,38 @@ router = APIRouter()
 # ============================================================================
 
 class UpdatePromptRequest(BaseModel):
-    """Request model for updating prompts."""
+    """Request model for updating prompts (legacy, system prompt only)."""
     system_prompt: str
-    user_prompt: str
 
 
 class PreviewPromptRequest(BaseModel):
-    """Request model for previewing prompts."""
+    """Request model for previewing prompts.
+
+    Both system and user prompts can be customized for preview purposes.
+    """
     variables: dict[str, Any]
-    custom_system_prompt: Optional[str] = None
-    custom_user_prompt: Optional[str] = None
+    custom_system_prompt: Optional[str] = None  # Custom system prompt for preview
+    custom_user_prompt: Optional[str] = None  # Custom user prompt for preview
 
 
 class PreviewPromptResponse(BaseModel):
     """Response model for prompt preview."""
     system_prompt: str
     user_prompt: str
+    validation: Optional[dict] = None
+
+
+class ValidateTemplateRequest(BaseModel):
+    """Request model for validating a template."""
+    template: str
+    variables: dict[str, Any]
+
+
+class ValidateTemplateResponse(BaseModel):
+    """Response model for template validation."""
+    is_valid: bool
+    missing_variables: List[str]
+    warnings: List[str]
 
 
 class TemplateCreateRequest(BaseModel):
@@ -50,9 +65,8 @@ class TemplateCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     category: str
-    system_prompt: str
-    default_user_prompt: Optional[str] = None
-    variables: Optional[List[str]] = None
+    template_name: str  # User-provided filename (e.g., 'reformed-theology')
+    system_prompt: str  # Content to save to file
     is_default: bool = False
 
 
@@ -60,104 +74,72 @@ class TemplateUpdateRequest(BaseModel):
     """Update an existing prompt template."""
     name: Optional[str] = None
     description: Optional[str] = None
-    system_prompt: Optional[str] = None
-    default_user_prompt: Optional[str] = None
-    variables: Optional[List[str]] = None
+    system_prompt: Optional[str] = None  # If provided, saves to file
+    display_name: Optional[str] = None  # Custom display name (stored in metadata.json)
     is_default: Optional[bool] = None
 
 
 class TemplateResponse(BaseModel):
-    """Response model for prompt template."""
-    id: str
-    name: str
-    description: Optional[str]
+    """Response model for prompt template (filesystem-based)."""
     category: str
-    system_prompt: str
-    default_user_prompt: Optional[str]
-    variables: Optional[List[str]]
-    is_builtin: bool
-    is_default: bool
-    created_at: str
-    updated_at: str
+    template_name: str  # e.g., 'default', 'reformed-theology'
+    display_name: str  # e.g., 'Default', 'Reformed Theology'
+    system_prompt: str  # Loaded from file
+    user_prompt: str  # Loaded from file
+    variables: List[str]  # Extracted from template
+    last_modified: str
 
 
 class ProjectConfigRequest(BaseModel):
-    """Create or update project-specific prompt config."""
-    template_id: Optional[str] = None
-    custom_system_prompt: Optional[str] = None
-    custom_user_prompt: Optional[str] = None
-    use_custom_system: bool = False
-    use_custom_user: bool = False
+    """Create or update project-specific prompt config.
+
+    System prompts always come from global templates.
+    User prompts can be customized per-project via files.
+    """
+    template_name: str = "default"  # Global template name (e.g., 'default', 'reformed-theology')
+    custom_user_prompt: Optional[str] = None  # If provided, saves to project file
 
 
 class ProjectConfigResponse(BaseModel):
-    """Response model for project prompt config."""
+    """Response model for project prompt config.
+
+    Following 'only metadata in database' principle:
+    - System prompts: Always from global templates
+    - User prompts: From project files or global templates
+    """
     id: str
     project_id: str
     category: str
-    template_id: Optional[str]
-    template_name: Optional[str]
-    custom_system_prompt: Optional[str]
-    custom_user_prompt: Optional[str]
-    use_custom_system: bool
-    use_custom_user: bool
-    resolved_system_prompt: str
-    resolved_user_prompt: str
+    template_name: str  # Global template name
+    has_custom_user_prompt: bool  # Whether project has custom user prompt file
+    resolved_system_prompt: str  # Loaded from global template
+    resolved_user_prompt: str  # Loaded from project file or global template
 
 
-class ProjectVariableCreate(BaseModel):
-    """Create a project variable."""
-    name: str
-    value: str
-    value_type: str = "string"
-    description: Optional[str] = None
+class ProjectVariablesRequest(BaseModel):
+    """Request model for updating project variables (file-based)."""
+    variables: dict[str, Any]  # Key-value pairs to save to variables.json
 
 
-class ProjectVariableUpdate(BaseModel):
-    """Update a project variable."""
-    value: Optional[str] = None
-    value_type: Optional[str] = None
-    description: Optional[str] = None
-
-
-class ProjectVariableResponse(BaseModel):
-    """Response model for project variable."""
-    id: str
+class ProjectVariablesResponse(BaseModel):
+    """Response model for project variables (file-based)."""
     project_id: str
-    name: str
-    value: str
-    value_type: str
-    description: Optional[str]
-    created_at: str
-    updated_at: str
+    variables: dict[str, Any]  # All variables from variables.json
 
 
 # ============================================================================
 # Helper Functions
 # ============================================================================
 
-def _template_to_response(template: DBPromptTemplate) -> TemplateResponse:
-    """Convert template model to response."""
-    variables = None
-    if template.variables:
-        try:
-            variables = json.loads(template.variables)
-        except json.JSONDecodeError:
-            variables = []
+def _template_name_to_display(template_name: str, category: str = "") -> str:
+    """Get display name for a template.
 
-    return TemplateResponse(
-        id=template.id,
-        name=template.name,
-        description=template.description,
-        category=template.category,
-        system_prompt=template.system_prompt,
-        default_user_prompt=template.default_user_prompt,
-        variables=variables,
-        is_builtin=template.is_builtin,
-        is_default=template.is_default,
-        created_at=template.created_at.isoformat(),
-        updated_at=template.updated_at.isoformat(),
-    )
+    If category is provided, checks for custom display name in metadata.
+    Otherwise, auto-generates from template name.
+    """
+    if category:
+        return PromptLoader.get_display_name(category, template_name)
+    return template_name.replace("-", " ").title()
 
 
 # ============================================================================
@@ -176,47 +158,128 @@ async def list_categories() -> List[str]:
     return [c.value for c in PromptCategory]
 
 
-@router.post("/prompts/sync-builtin")
-async def sync_builtin_templates(
-    db: AsyncSession = Depends(get_db),
-):
-    """Sync built-in templates from the file system prompts directory."""
-    synced = []
-    for category in PromptCategory:
-        try:
-            file_template = PromptLoader.load_template(category.value)
+@router.get("/prompts/file-templates/{category}")
+async def list_file_templates(category: str) -> dict:
+    """List available file-based templates for a category.
 
-            result = await db.execute(
-                select(DBPromptTemplate)
-                .where(DBPromptTemplate.category == category.value)
-                .where(DBPromptTemplate.is_builtin == True)
-            )
-            existing = result.scalar_one_or_none()
+    Returns template names like 'default', 'reformed-theology', etc.
+    """
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
+        )
 
-            if existing:
-                existing.system_prompt = file_template.system_prompt
-                existing.default_user_prompt = file_template.user_prompt_template
-                existing.variables = json.dumps(file_template.variables)
-            else:
-                template = DBPromptTemplate(
-                    id=str(uuid.uuid4()),
-                    name=f"Default {category.value.title()}",
-                    description=f"Built-in {category.value} prompt template",
-                    category=category.value,
-                    system_prompt=file_template.system_prompt,
-                    default_user_prompt=file_template.user_prompt_template,
-                    variables=json.dumps(file_template.variables),
-                    is_builtin=True,
-                    is_default=True,
+    templates = PromptLoader.list_available_templates(category)
+    return {
+        "category": category,
+        "templates": templates,
+    }
+
+
+@router.get("/prompts/file-templates/{category}/{template_name}")
+async def get_file_template(
+    category: str,
+    template_name: str,
+    project_id: Optional[str] = None,
+) -> dict:
+    """Get a specific file-based template.
+
+    Args:
+        category: Prompt category (analysis, translation, etc.)
+        template_name: Template name (default, reformed-theology, etc.)
+        project_id: Optional project ID to load project-local user prompts
+    """
+    try:
+        template = PromptLoader.load_template(
+            category,
+            template_name=template_name,
+            project_id=project_id
+        )
+        return {
+            "type": template.type,
+            "template_name": template.template_name,
+            "system_prompt": template.system_prompt,
+            "user_prompt": template.user_prompt_template,
+            "variables": template.variables,
+            "last_modified": template.last_modified.isoformat(),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/prompts/project-resolved/{project_id}/{category}")
+async def get_project_resolved_prompts(
+    project_id: str,
+    category: str,
+) -> dict:
+    """Get resolved prompts for a project based on its config.json.
+
+    This is the new file-based approach that reads from:
+    - Project config.json to determine which template to use
+    - Project-local user prompts if they exist
+    - Global system prompts
+    """
+    try:
+        template = PromptLoader.load_for_project(project_id, category)
+        config = PromptLoader.load_project_config(project_id)
+
+        # Get template name from config
+        template_name = "default"
+        has_project_user_prompt = False
+        if config and "prompts" in config:
+            prompt_config = config["prompts"].get(category, {})
+            template_name = prompt_config.get("system_template", "default")
+            # Check if project has custom user prompt
+            user_path = prompt_config.get("user")
+            if user_path:
+                project_user_path = PromptLoader.get_project_prompt_path(
+                    project_id, category, "user"
                 )
-                db.add(template)
+                has_project_user_prompt = project_user_path.exists()
 
-            synced.append(category.value)
-        except ValueError:
-            pass
+        return {
+            "project_id": project_id,
+            "category": category,
+            "template_name": template_name,
+            "has_project_user_prompt": has_project_user_prompt,
+            "system_prompt": template.system_prompt,
+            "user_prompt": template.user_prompt_template,
+            "variables": template.variables,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
-    await db.commit()
-    return {"synced": synced}
+
+
+
+@router.post("/prompts/validate")
+async def validate_template(
+    request: ValidateTemplateRequest,
+) -> ValidateTemplateResponse:
+    """Validate a template against provided variables.
+
+    Checks for:
+    - Missing variables (used in template but not provided)
+    - Empty critical variables
+    - Conditional variables that will be skipped
+
+    Args:
+        request: Template string and available variables
+
+    Returns:
+        Validation result with missing variables and warnings
+    """
+    result = PromptLoader.validate_template(request.template, request.variables)
+    return ValidateTemplateResponse(
+        is_valid=result.is_valid,
+        missing_variables=result.missing_variables,
+        warnings=result.warnings,
+    )
 
 
 # ============================================================================
@@ -226,26 +289,48 @@ async def sync_builtin_templates(
 @router.get("/prompts/templates")
 async def list_templates(
     category: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
 ) -> List[TemplateResponse]:
-    """List all prompt templates, optionally filtered by category."""
-    query = select(DBPromptTemplate)
-    if category:
-        query = query.where(DBPromptTemplate.category == category)
-    query = query.order_by(DBPromptTemplate.category, DBPromptTemplate.name)
+    """List all prompt templates from filesystem, optionally filtered by category.
 
-    result = await db.execute(query)
-    templates = result.scalars().all()
+    Templates are read directly from backend/prompts/{category}/ directories.
+    No database sync needed.
+    """
+    templates: List[TemplateResponse] = []
 
-    return [_template_to_response(t) for t in templates]
+    # Determine which categories to scan
+    categories = [category] if category else [c.value for c in PromptCategory]
+
+    for cat in categories:
+        if cat not in PromptLoader.VALID_TYPES:
+            continue
+
+        template_names = PromptLoader.list_available_templates(cat)
+        for template_name in template_names:
+            try:
+                file_template = PromptLoader.load_template(cat, template_name=template_name)
+                templates.append(TemplateResponse(
+                    category=cat,
+                    template_name=template_name,
+                    display_name=_template_name_to_display(template_name, cat),
+                    system_prompt=file_template.system_prompt,
+                    user_prompt=file_template.user_prompt_template,
+                    variables=file_template.variables,
+                    last_modified=file_template.last_modified.isoformat(),
+                ))
+            except (ValueError, FileNotFoundError):
+                pass
+
+    return templates
 
 
 @router.post("/prompts/templates")
 async def create_template(
     request: TemplateCreateRequest,
-    db: AsyncSession = Depends(get_db),
 ) -> TemplateResponse:
-    """Create a new prompt template."""
+    """Create a new prompt template.
+
+    Creates the file-based template in backend/prompts/{category}/.
+    """
     valid_categories = [c.value for c in PromptCategory]
     if request.category not in valid_categories:
         raise HTTPException(
@@ -253,119 +338,274 @@ async def create_template(
             detail=f"Invalid category. Must be one of: {valid_categories}"
         )
 
-    if request.is_default:
-        result = await db.execute(
-            select(DBPromptTemplate)
-            .where(DBPromptTemplate.category == request.category)
-            .where(DBPromptTemplate.is_default == True)
+    # Validate template_name format (lowercase, hyphens, no spaces)
+    import re
+    if not re.match(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$', request.template_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Template name must be lowercase letters, numbers, and hyphens only (e.g., 'my-template')"
         )
-        for t in result.scalars().all():
-            t.is_default = False
 
-    template = DBPromptTemplate(
-        id=str(uuid.uuid4()),
-        name=request.name,
-        description=request.description,
+    if request.template_name == "default":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot use 'default' as template name (reserved)"
+        )
+
+    # Check if template name already exists
+    existing_templates = PromptLoader.list_available_templates(request.category)
+    if request.template_name in existing_templates:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template '{request.template_name}' already exists for {request.category}"
+        )
+
+    # Save system prompt to file
+    file_template = PromptLoader.save_template(
+        request.category,
+        request.system_prompt,
+        template_name=request.template_name
+    )
+
+    # Save custom display name if provided (name field)
+    if request.name and request.name != _template_name_to_display(request.template_name):
+        PromptLoader.set_display_name(request.category, request.template_name, request.name)
+
+    return TemplateResponse(
         category=request.category,
-        system_prompt=request.system_prompt,
-        default_user_prompt=request.default_user_prompt,
-        variables=json.dumps(request.variables) if request.variables else None,
-        is_builtin=False,
-        is_default=request.is_default,
+        template_name=request.template_name,
+        display_name=_template_name_to_display(request.template_name, request.category),
+        system_prompt=file_template.system_prompt,
+        user_prompt=file_template.user_prompt_template,
+        variables=file_template.variables,
+        last_modified=file_template.last_modified.isoformat(),
     )
-    db.add(template)
-    await db.commit()
-    await db.refresh(template)
-
-    return _template_to_response(template)
 
 
-@router.get("/prompts/templates/{template_id}")
+@router.get("/prompts/templates/{category}/{template_name}")
 async def get_template(
-    template_id: str,
-    db: AsyncSession = Depends(get_db),
+    category: str,
+    template_name: str,
 ) -> TemplateResponse:
-    """Get a specific prompt template."""
-    result = await db.execute(
-        select(DBPromptTemplate).where(DBPromptTemplate.id == template_id)
-    )
-    template = result.scalar_one_or_none()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    return _template_to_response(template)
-
-
-@router.put("/prompts/templates/{template_id}")
-async def update_template(
-    template_id: str,
-    request: TemplateUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-) -> TemplateResponse:
-    """Update an existing prompt template."""
-    result = await db.execute(
-        select(DBPromptTemplate).where(DBPromptTemplate.id == template_id)
-    )
-    template = result.scalar_one_or_none()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    if request.name is not None:
-        template.name = request.name
-    if request.description is not None:
-        template.description = request.description
-    if request.system_prompt is not None:
-        template.system_prompt = request.system_prompt
-    if request.default_user_prompt is not None:
-        template.default_user_prompt = request.default_user_prompt
-    if request.variables is not None:
-        template.variables = json.dumps(request.variables)
-    if request.is_default is not None:
-        if request.is_default and not template.is_default:
-            result = await db.execute(
-                select(DBPromptTemplate)
-                .where(DBPromptTemplate.category == template.category)
-                .where(DBPromptTemplate.is_default == True)
-                .where(DBPromptTemplate.id != template_id)
-            )
-            for t in result.scalars().all():
-                t.is_default = False
-        template.is_default = request.is_default
-
-    # If this is a built-in template and prompts were updated, save to .md files
-    if template.is_builtin and (request.system_prompt is not None or request.default_user_prompt is not None):
-        PromptLoader.save_template(
-            template.category,
-            template.system_prompt,
-            template.default_user_prompt or ""
+    """Get a specific prompt template by category and name."""
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
         )
 
-    await db.commit()
-    await db.refresh(template)
-
-    return _template_to_response(template)
-
-
-@router.delete("/prompts/templates/{template_id}")
-async def delete_template(
-    template_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete a prompt template."""
-    result = await db.execute(
-        select(DBPromptTemplate).where(DBPromptTemplate.id == template_id)
-    )
-    template = result.scalar_one_or_none()
-    if not template:
+    try:
+        file_template = PromptLoader.load_template(category, template_name=template_name)
+        return TemplateResponse(
+            category=category,
+            template_name=template_name,
+            display_name=_template_name_to_display(template_name, category),
+            system_prompt=file_template.system_prompt,
+            user_prompt=file_template.user_prompt_template,
+            variables=file_template.variables,
+            last_modified=file_template.last_modified.isoformat(),
+        )
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    if template.is_builtin:
-        raise HTTPException(status_code=400, detail="Cannot delete built-in template")
 
-    await db.delete(template)
-    await db.commit()
+@router.put("/prompts/templates/{category}/{template_name}")
+async def update_template(
+    category: str,
+    template_name: str,
+    request: TemplateUpdateRequest,
+) -> TemplateResponse:
+    """Update an existing prompt template.
 
-    return {"message": "Template deleted"}
+    Updates the system prompt file content.
+    """
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
+        )
+
+    # Check template exists
+    existing_templates = PromptLoader.list_available_templates(category)
+    if template_name not in existing_templates:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # If system_prompt provided, update file
+    if request.system_prompt is not None:
+        file_template = PromptLoader.save_template(
+            category,
+            request.system_prompt,
+            template_name=template_name
+        )
+    else:
+        file_template = PromptLoader.load_template(category, template_name=template_name)
+
+    # If display_name provided, save to metadata
+    if request.display_name is not None:
+        PromptLoader.set_display_name(category, template_name, request.display_name)
+
+    return TemplateResponse(
+        category=category,
+        template_name=template_name,
+        display_name=_template_name_to_display(template_name, category),
+        system_prompt=file_template.system_prompt,
+        user_prompt=file_template.user_prompt_template,
+        variables=file_template.variables,
+        last_modified=file_template.last_modified.isoformat(),
+    )
+
+
+@router.delete("/prompts/templates/{category}/{template_name}")
+async def delete_template(
+    category: str,
+    template_name: str,
+):
+    """Delete a prompt template.
+
+    Deletes the template file from the filesystem.
+    """
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
+        )
+
+    if template_name == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default template")
+
+    # Check template exists
+    existing_templates = PromptLoader.list_available_templates(category)
+    if template_name not in existing_templates:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Delete files
+    try:
+        files_deleted = PromptLoader.delete_template(category, template_name)
+        # Also delete metadata (display name, etc.)
+        PromptLoader.delete_template_metadata(category, template_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "message": "Template deleted",
+        "files_deleted": files_deleted
+    }
+
+
+class RenameTemplateRequest(BaseModel):
+    """Request model for renaming a template."""
+    new_name: str
+
+
+@router.post("/prompts/templates/{category}/{template_name}/rename")
+async def rename_template(
+    category: str,
+    template_name: str,
+    request: RenameTemplateRequest,
+) -> TemplateResponse:
+    """Rename a prompt template.
+
+    Renames the template file and returns the updated template info.
+    """
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
+        )
+
+    try:
+        PromptLoader.rename_template(category, template_name, request.new_name)
+        # Also rename metadata (preserve display name, etc.)
+        PromptLoader.rename_template_metadata(category, template_name, request.new_name)
+
+        # Load and return the renamed template
+        file_template = PromptLoader.load_template(category, template_name=request.new_name)
+        return TemplateResponse(
+            category=category,
+            template_name=request.new_name,
+            display_name=_template_name_to_display(request.new_name, category),
+            system_prompt=file_template.system_prompt,
+            user_prompt=file_template.user_prompt_template,
+            variables=file_template.variables,
+            last_modified=file_template.last_modified.isoformat(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ============================================================================
+# Default Template Routes
+# ============================================================================
+
+class DefaultsResponse(BaseModel):
+    """Response model for default templates."""
+    defaults: dict[str, str]  # category -> template_name
+
+
+class SetDefaultRequest(BaseModel):
+    """Request model for setting default template."""
+    template_name: str
+
+
+@router.get("/prompts/defaults")
+async def get_defaults() -> DefaultsResponse:
+    """Get the default templates for all categories.
+
+    Returns:
+        Dict mapping category to default template name
+    """
+    defaults = PromptLoader.get_defaults()
+    return DefaultsResponse(defaults=defaults)
+
+
+@router.get("/prompts/defaults/{category}")
+async def get_default_for_category(category: str) -> dict:
+    """Get the default template for a specific category.
+
+    Args:
+        category: Prompt category (analysis, translation, etc.)
+
+    Returns:
+        Default template name for the category
+    """
+    if category not in PromptLoader.VALID_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {PromptLoader.VALID_TYPES}"
+        )
+
+    template_name = PromptLoader.get_default_template(category)
+    return {
+        "category": category,
+        "template_name": template_name,
+    }
+
+
+@router.put("/prompts/defaults/{category}")
+async def set_default_for_category(
+    category: str,
+    request: SetDefaultRequest,
+) -> dict:
+    """Set the default template for a specific category.
+
+    Args:
+        category: Prompt category (analysis, translation, etc.)
+        request: Template name to set as default
+
+    Returns:
+        Updated default template info
+    """
+    try:
+        PromptLoader.set_default_template(category, request.template_name)
+        return {
+            "category": category,
+            "template_name": request.template_name,
+            "message": f"Default template for {category} set to {request.template_name}",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ============================================================================
@@ -377,7 +617,14 @@ async def list_project_configs(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> List[ProjectConfigResponse]:
-    """List all prompt configs for a project."""
+    """List all prompt configs for a project.
+
+    System prompts always come from global templates.
+    User prompts come from project files if they exist, otherwise global templates.
+
+    Always returns all 4 categories. For categories without a database row,
+    returns a default config.
+    """
     result = await db.execute(
         select(ProjectPromptConfig)
         .where(ProjectPromptConfig.project_id == project_id)
@@ -385,34 +632,58 @@ async def list_project_configs(
     )
     configs = result.scalars().all()
 
-    responses = []
-    for config in configs:
-        template = None
-        if config.template_id:
-            result = await db.execute(
-                select(DBPromptTemplate).where(DBPromptTemplate.id == config.template_id)
-            )
-            template = result.scalar_one_or_none()
+    # Create a map of existing configs by category
+    config_map = {config.category: config for config in configs}
 
-        resolved_system = config.custom_system_prompt if config.use_custom_system else (
-            template.system_prompt if template else ""
+    responses = []
+
+    # Always return all categories
+    for category in [c.value for c in PromptCategory]:
+        config = config_map.get(category)
+
+        if config:
+            template_name = config.template_name or "default"
+            config_id = config.id
+        else:
+            # No config exists - use defaults
+            template_name = "default"
+            config_id = ""
+
+        # Check if project has custom user prompt FILE (filesystem is source of truth)
+        project_user_path = PromptLoader.get_project_prompt_path(
+            project_id, category, "user"
         )
-        resolved_user = config.custom_user_prompt if config.use_custom_user else (
-            template.default_user_prompt if template else ""
-        )
+        has_custom_user_prompt = project_user_path.exists()
+
+        # Sync database flag if out of sync with filesystem
+        if config and config.has_custom_user_prompt != has_custom_user_prompt:
+            config.has_custom_user_prompt = has_custom_user_prompt
+            await db.commit()
+
+        # Load template from filesystem (system prompt always from global)
+        try:
+            template_content = PromptLoader.load_template(
+                category,
+                template_name=template_name,
+                project_id=project_id  # This checks for project-local user prompts
+            )
+        except (ValueError, FileNotFoundError):
+            template_content = None
+
+        # System prompt: always from global template
+        resolved_system = template_content.system_prompt if template_content else ""
+
+        # User prompt: from project file (via load_template) or global template
+        resolved_user = template_content.user_prompt_template if template_content else ""
 
         responses.append(ProjectConfigResponse(
-            id=config.id,
-            project_id=config.project_id,
-            category=config.category,
-            template_id=config.template_id,
-            template_name=template.name if template else None,
-            custom_system_prompt=config.custom_system_prompt,
-            custom_user_prompt=config.custom_user_prompt,
-            use_custom_system=config.use_custom_system,
-            use_custom_user=config.use_custom_user,
-            resolved_system_prompt=resolved_system or "",
-            resolved_user_prompt=resolved_user or "",
+            id=config_id,
+            project_id=project_id,
+            category=category,
+            template_name=template_name,
+            has_custom_user_prompt=has_custom_user_prompt,
+            resolved_system_prompt=resolved_system,
+            resolved_user_prompt=resolved_user,
         ))
 
     return responses
@@ -431,7 +702,7 @@ async def get_available_variables(
     - Content variables (source_text, paragraph_index, etc.)
     - Pipeline variables (existing_translation, reference_translation, etc.)
     - Derived variables (extracted from analysis)
-    - User-defined variables
+    - User-defined variables (from variables.json)
 
     Args:
         project_id: Project ID
@@ -440,9 +711,14 @@ async def get_available_variables(
     Returns:
         Dictionary with variable categories and their variables
     """
-    from app.core.prompts.variables import VariableService
+    from app.core.prompts.variables import VariableService, StageType
 
-    return await VariableService.get_available_variables(db, project_id, stage)
+    # Cast stage string to StageType if provided
+    stage_type: Optional[StageType] = None
+    if stage and stage in ["analysis", "translation", "optimization", "proofreading"]:
+        stage_type = stage  # type: ignore
+
+    return await VariableService.get_available_variables(db, project_id, stage_type)
 
 
 @router.get("/prompts/projects/{project_id}/{category}")
@@ -451,7 +727,11 @@ async def get_project_config(
     category: str,
     db: AsyncSession = Depends(get_db),
 ) -> ProjectConfigResponse:
-    """Get prompt config for a specific project and category."""
+    """Get prompt config for a specific project and category.
+
+    System prompts always come from global templates.
+    User prompts come from project files if they exist, otherwise global templates.
+    """
     result = await db.execute(
         select(ProjectPromptConfig)
         .where(ProjectPromptConfig.project_id == project_id)
@@ -460,63 +740,49 @@ async def get_project_config(
     config = result.scalar_one_or_none()
 
     if not config:
+        # No project config - use default template
         try:
-            file_template = PromptLoader.load_template(category)
+            file_template = PromptLoader.load_template(category, project_id=project_id)
             return ProjectConfigResponse(
                 id="",
                 project_id=project_id,
                 category=category,
-                template_id=None,
-                template_name="Default (from file)",
-                custom_system_prompt=None,
-                custom_user_prompt=None,
-                use_custom_system=False,
-                use_custom_user=False,
+                template_name="default",
+                has_custom_user_prompt=False,
                 resolved_system_prompt=file_template.system_prompt,
                 resolved_user_prompt=file_template.user_prompt_template,
             )
-        except ValueError:
-            raise HTTPException(status_code=404, detail=f"No config for category: {category}")
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail=f"No template for category: {category}")
 
-    template = None
-    if config.template_id:
-        result = await db.execute(
-            select(DBPromptTemplate).where(DBPromptTemplate.id == config.template_id)
+    # Load template from filesystem with project context
+    template_name = config.template_name or "default"
+    try:
+        template_content = PromptLoader.load_template(
+            category,
+            template_name=template_name,
+            project_id=project_id
         )
-        template = result.scalar_one_or_none()
-
-    if config.use_custom_system:
-        resolved_system = config.custom_system_prompt or ""
-    elif template:
-        resolved_system = template.system_prompt
-    else:
+    except (ValueError, FileNotFoundError):
+        # Fallback to default if specified template not found
         try:
-            file_template = PromptLoader.load_template(category)
-            resolved_system = file_template.system_prompt
-        except ValueError:
-            resolved_system = ""
+            template_content = PromptLoader.load_template(category, project_id=project_id)
+            template_name = "default"
+        except (ValueError, FileNotFoundError):
+            template_content = None
 
-    if config.use_custom_user:
-        resolved_user = config.custom_user_prompt or ""
-    elif template:
-        resolved_user = template.default_user_prompt or ""
-    else:
-        try:
-            file_template = PromptLoader.load_template(category)
-            resolved_user = file_template.user_prompt_template
-        except ValueError:
-            resolved_user = ""
+    # System prompt: always from global template
+    resolved_system = template_content.system_prompt if template_content else ""
+
+    # User prompt: from project file (via load_template) or global template
+    resolved_user = template_content.user_prompt_template if template_content else ""
 
     return ProjectConfigResponse(
         id=config.id,
         project_id=config.project_id,
         category=config.category,
-        template_id=config.template_id,
-        template_name=template.name if template else None,
-        custom_system_prompt=config.custom_system_prompt,
-        custom_user_prompt=config.custom_user_prompt,
-        use_custom_system=config.use_custom_system,
-        use_custom_user=config.use_custom_user,
+        template_name=template_name,
+        has_custom_user_prompt=config.has_custom_user_prompt,
         resolved_system_prompt=resolved_system,
         resolved_user_prompt=resolved_user,
     )
@@ -529,7 +795,11 @@ async def update_project_config(
     request: ProjectConfigRequest,
     db: AsyncSession = Depends(get_db),
 ) -> ProjectConfigResponse:
-    """Create or update prompt config for a project and category."""
+    """Create or update prompt config for a project and category.
+
+    System prompts always come from global templates (not customizable per-project).
+    User prompts can be customized by saving to project files.
+    """
     valid_categories = [c.value for c in PromptCategory]
     if category not in valid_categories:
         raise HTTPException(
@@ -537,20 +807,16 @@ async def update_project_config(
             detail=f"Invalid category. Must be one of: {valid_categories}"
         )
 
-    template = None
-    if request.template_id:
-        result = await db.execute(
-            select(DBPromptTemplate).where(DBPromptTemplate.id == request.template_id)
+    # Verify template exists in filesystem
+    template_name = request.template_name or "default"
+    existing_templates = PromptLoader.list_available_templates(category)
+    if template_name not in existing_templates:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Template '{template_name}' not found for {category}"
         )
-        template = result.scalar_one_or_none()
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-        if template.category != category:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Template category mismatch"
-            )
 
+    # First, check if config already exists to preserve existing flag
     result = await db.execute(
         select(ProjectPromptConfig)
         .where(ProjectPromptConfig.project_id == project_id)
@@ -558,60 +824,51 @@ async def update_project_config(
     )
     config = result.scalar_one_or_none()
 
+    # Determine has_custom_user_prompt flag:
+    # - If new custom prompt is provided, save it and set flag to True
+    # - Otherwise, preserve existing flag (or False if no config exists)
+    if request.custom_user_prompt:
+        PromptLoader.save_project_user_prompt(project_id, category, request.custom_user_prompt)
+        has_custom_user_prompt = True
+    else:
+        # Preserve existing flag if config exists, otherwise False
+        has_custom_user_prompt = config.has_custom_user_prompt if config else False
+
     if config:
-        config.template_id = request.template_id
-        config.custom_system_prompt = request.custom_system_prompt
-        config.custom_user_prompt = request.custom_user_prompt
-        config.use_custom_system = request.use_custom_system
-        config.use_custom_user = request.use_custom_user
+        config.template_name = template_name
+        config.has_custom_user_prompt = has_custom_user_prompt
     else:
         config = ProjectPromptConfig(
             id=str(uuid.uuid4()),
             project_id=project_id,
             category=category,
-            template_id=request.template_id,
-            custom_system_prompt=request.custom_system_prompt,
-            custom_user_prompt=request.custom_user_prompt,
-            use_custom_system=request.use_custom_system,
-            use_custom_user=request.use_custom_user,
+            template_name=template_name,
+            has_custom_user_prompt=has_custom_user_prompt,
         )
         db.add(config)
 
     await db.commit()
     await db.refresh(config)
 
-    if config.use_custom_system:
-        resolved_system = config.custom_system_prompt or ""
-    elif template:
-        resolved_system = template.system_prompt
-    else:
-        try:
-            file_template = PromptLoader.load_template(category)
-            resolved_system = file_template.system_prompt
-        except ValueError:
-            resolved_system = ""
-
-    if config.use_custom_user:
-        resolved_user = config.custom_user_prompt or ""
-    elif template:
-        resolved_user = template.default_user_prompt or ""
-    else:
-        try:
-            file_template = PromptLoader.load_template(category)
-            resolved_user = file_template.user_prompt_template
-        except ValueError:
-            resolved_user = ""
+    # Load template with project context (includes project user prompt if exists)
+    try:
+        template_content = PromptLoader.load_template(
+            category,
+            template_name=template_name,
+            project_id=project_id
+        )
+        resolved_system = template_content.system_prompt
+        resolved_user = template_content.user_prompt_template
+    except (ValueError, FileNotFoundError):
+        resolved_system = ""
+        resolved_user = ""
 
     return ProjectConfigResponse(
         id=config.id,
         project_id=config.project_id,
         category=config.category,
-        template_id=config.template_id,
-        template_name=template.name if template else None,
-        custom_system_prompt=config.custom_system_prompt,
-        custom_user_prompt=config.custom_user_prompt,
-        use_custom_system=config.use_custom_system,
-        use_custom_user=config.use_custom_user,
+        template_name=config.template_name,
+        has_custom_user_prompt=config.has_custom_user_prompt,
         resolved_system_prompt=resolved_system,
         resolved_user_prompt=resolved_user,
     )
@@ -638,178 +895,103 @@ async def delete_project_config(
     return {"message": "Config deleted, reverted to defaults"}
 
 
-# ============================================================================
-# Project Variables Routes
-# ============================================================================
+@router.delete("/prompts/projects/{project_id}/{category}/user-prompt")
+async def reset_project_user_prompt(
+    project_id: str,
+    category: str,
+    db: AsyncSession = Depends(get_db),
+) -> ProjectConfigResponse:
+    """Reset a project's custom user prompt to the default template.
 
-def _variable_to_response(var: ProjectVariable) -> ProjectVariableResponse:
-    """Convert variable model to response."""
-    return ProjectVariableResponse(
-        id=var.id,
-        project_id=var.project_id,
-        name=var.name,
-        value=var.value,
-        value_type=var.value_type,
-        description=var.description,
-        created_at=var.created_at.isoformat(),
-        updated_at=var.updated_at.isoformat(),
+    Deletes the project's custom user prompt file and updates the database flag.
+    Returns the updated config with the default user prompt.
+    """
+    valid_categories = [c.value for c in PromptCategory]
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {valid_categories}"
+        )
+
+    # Delete the project's custom user prompt file
+    deleted = PromptLoader.delete_project_user_prompt(project_id, category)
+
+    # Update database flag
+    result = await db.execute(
+        select(ProjectPromptConfig)
+        .where(ProjectPromptConfig.project_id == project_id)
+        .where(ProjectPromptConfig.category == category)
+    )
+    config = result.scalar_one_or_none()
+
+    if config:
+        config.has_custom_user_prompt = False
+        await db.commit()
+        await db.refresh(config)
+        template_name = config.template_name or "default"
+        config_id = config.id
+    else:
+        template_name = "default"
+        config_id = ""
+
+    # Load the default template
+    try:
+        template_content = PromptLoader.load_template(
+            category,
+            template_name=template_name,
+            project_id=None  # Don't load project-local (we just deleted it)
+        )
+        resolved_system = template_content.system_prompt
+        resolved_user = template_content.user_prompt_template
+    except (ValueError, FileNotFoundError):
+        resolved_system = ""
+        resolved_user = ""
+
+    return ProjectConfigResponse(
+        id=config_id,
+        project_id=project_id,
+        category=category,
+        template_name=template_name,
+        has_custom_user_prompt=False,
+        resolved_system_prompt=resolved_system,
+        resolved_user_prompt=resolved_user,
     )
 
+
+# ============================================================================
+# Project Variables Routes (File-based)
+# ============================================================================
 
 @router.get("/prompts/projects/{project_id}/variables")
-async def list_project_variables(
+async def get_project_variables(
     project_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> List[ProjectVariableResponse]:
-    """List all variables for a project."""
-    result = await db.execute(
-        select(ProjectVariable)
-        .where(ProjectVariable.project_id == project_id)
-        .order_by(ProjectVariable.name)
-    )
-    variables = result.scalars().all()
-    return [_variable_to_response(v) for v in variables]
+) -> ProjectVariablesResponse:
+    """Get all variables for a project from variables.json file.
 
-
-@router.post("/prompts/projects/{project_id}/variables")
-async def create_project_variable(
-    project_id: str,
-    request: ProjectVariableCreate,
-    db: AsyncSession = Depends(get_db),
-) -> ProjectVariableResponse:
-    """Create a new variable for a project."""
-    # Validate variable type
-    valid_types = [t.value for t in VariableType]
-    if request.value_type not in valid_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid value_type. Must be one of: {valid_types}"
-        )
-
-    # Check for duplicate name
-    result = await db.execute(
-        select(ProjectVariable)
-        .where(ProjectVariable.project_id == project_id)
-        .where(ProjectVariable.name == request.name)
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Variable '{request.name}' already exists for this project"
-        )
-
-    # Validate JSON if type is json
-    if request.value_type == VariableType.JSON.value:
-        try:
-            json.loads(request.value)
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=400,
-                detail="Value must be valid JSON for json type"
-            )
-
-    variable = ProjectVariable(
-        id=str(uuid.uuid4()),
+    Variables are stored in: projects/{project_id}/variables.json
+    """
+    variables = PromptLoader.load_project_variables(project_id)
+    return ProjectVariablesResponse(
         project_id=project_id,
-        name=request.name,
-        value=request.value,
-        value_type=request.value_type,
-        description=request.description,
+        variables=variables,
     )
-    db.add(variable)
-    await db.commit()
-    await db.refresh(variable)
-
-    return _variable_to_response(variable)
 
 
-@router.get("/prompts/projects/{project_id}/variables/{variable_name}")
-async def get_project_variable(
+@router.put("/prompts/projects/{project_id}/variables")
+async def update_project_variables(
     project_id: str,
-    variable_name: str,
-    db: AsyncSession = Depends(get_db),
-) -> ProjectVariableResponse:
-    """Get a specific variable for a project."""
-    result = await db.execute(
-        select(ProjectVariable)
-        .where(ProjectVariable.project_id == project_id)
-        .where(ProjectVariable.name == variable_name)
+    request: ProjectVariablesRequest,
+) -> ProjectVariablesResponse:
+    """Update all variables for a project (saves to variables.json file).
+
+    Replaces the entire variables.json file with the provided variables.
+    Variables are stored in: projects/{project_id}/variables.json
+    """
+    PromptLoader.save_project_variables(project_id, request.variables)
+    return ProjectVariablesResponse(
+        project_id=project_id,
+        variables=request.variables,
     )
-    variable = result.scalar_one_or_none()
-    if not variable:
-        raise HTTPException(status_code=404, detail="Variable not found")
-
-    return _variable_to_response(variable)
-
-
-@router.put("/prompts/projects/{project_id}/variables/{variable_name}")
-async def update_project_variable(
-    project_id: str,
-    variable_name: str,
-    request: ProjectVariableUpdate,
-    db: AsyncSession = Depends(get_db),
-) -> ProjectVariableResponse:
-    """Update a variable for a project."""
-    result = await db.execute(
-        select(ProjectVariable)
-        .where(ProjectVariable.project_id == project_id)
-        .where(ProjectVariable.name == variable_name)
-    )
-    variable = result.scalar_one_or_none()
-    if not variable:
-        raise HTTPException(status_code=404, detail="Variable not found")
-
-    if request.value_type is not None:
-        valid_types = [t.value for t in VariableType]
-        if request.value_type not in valid_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid value_type. Must be one of: {valid_types}"
-            )
-        variable.value_type = request.value_type
-
-    if request.value is not None:
-        # Validate JSON if type is json
-        if variable.value_type == VariableType.JSON.value:
-            try:
-                json.loads(request.value)
-            except json.JSONDecodeError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Value must be valid JSON for json type"
-                )
-        variable.value = request.value
-
-    if request.description is not None:
-        variable.description = request.description
-
-    await db.commit()
-    await db.refresh(variable)
-
-    return _variable_to_response(variable)
-
-
-@router.delete("/prompts/projects/{project_id}/variables/{variable_name}")
-async def delete_project_variable(
-    project_id: str,
-    variable_name: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete a variable from a project."""
-    result = await db.execute(
-        select(ProjectVariable)
-        .where(ProjectVariable.project_id == project_id)
-        .where(ProjectVariable.name == variable_name)
-    )
-    variable = result.scalar_one_or_none()
-    if not variable:
-        raise HTTPException(status_code=404, detail="Variable not found")
-
-    await db.delete(variable)
-    await db.commit()
-
-    return {"message": f"Variable '{variable_name}' deleted"}
 
 
 # ============================================================================
@@ -821,7 +1003,7 @@ async def get_prompt_template(prompt_type: str) -> FilePromptTemplate:
     """Get a prompt template by type (file-based).
 
     Args:
-        prompt_type: Type of prompt (analysis, translation, reasoning, proofreading)
+        prompt_type: Type of prompt (analysis, translation, optimization, proofreading)
 
     Returns:
         PromptTemplate with system and user prompts
@@ -839,7 +1021,7 @@ async def update_prompt_template(
     prompt_type: str,
     request: UpdatePromptRequest,
 ) -> FilePromptTemplate:
-    """Update a prompt template (file-based).
+    """Update a prompt template (file-based, system prompt only).
 
     Args:
         prompt_type: Type of prompt to update
@@ -852,7 +1034,6 @@ async def update_prompt_template(
         return PromptLoader.save_template(
             prompt_type,
             request.system_prompt,
-            request.user_prompt,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -865,21 +1046,55 @@ async def preview_prompt(
 ) -> PreviewPromptResponse:
     """Preview rendered prompts with variables.
 
+    Both system and user prompts can be customized for preview purposes.
+
     Args:
         prompt_type: Type of prompt
         request: Variables and optional custom prompts
 
     Returns:
-        Rendered system and user prompts
+        Rendered system and user prompts with validation info
     """
     try:
-        result = PromptLoader.preview(
-            prompt_type,
-            request.variables,
-            request.custom_system_prompt,
-            request.custom_user_prompt,
+        # Load default template for fallback
+        template = PromptLoader.load_template(prompt_type)
+
+        # Use custom prompts if provided, otherwise use template defaults
+        system_template = request.custom_system_prompt or template.system_prompt
+        user_template = request.custom_user_prompt or template.user_prompt_template
+
+        # Validate before rendering
+        system_validation = PromptLoader.validate_template(
+            system_template, request.variables
         )
-        return PreviewPromptResponse(**result)
+        user_validation = PromptLoader.validate_template(
+            user_template, request.variables
+        )
+
+        # Combine validation results
+        combined_validation = {
+            "system": {
+                "is_valid": system_validation.is_valid,
+                "missing_variables": system_validation.missing_variables,
+                "warnings": system_validation.warnings,
+            },
+            "user": {
+                "is_valid": user_validation.is_valid,
+                "missing_variables": user_validation.missing_variables,
+                "warnings": user_validation.warnings,
+            },
+            "is_valid": system_validation.is_valid and user_validation.is_valid,
+        }
+
+        # Render templates with variable substitution
+        rendered_system = PromptLoader.render(system_template, request.variables)
+        rendered_user = PromptLoader.render(user_template, request.variables)
+
+        return PreviewPromptResponse(
+            system_prompt=rendered_system,
+            user_prompt=rendered_user,
+            validation=combined_validation,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:

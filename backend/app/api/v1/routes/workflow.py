@@ -77,21 +77,12 @@ async def get_workflow_status(
     # Get proofreading progress
     proofreading_progress = await _get_proofreading_progress(db, project_id)
 
-    # Derive translation_completed from task status if not already set
-    # This handles legacy projects that completed translation before the flag was added
-    translation_completed = project.translation_completed
-    if not translation_completed and translation_progress.get("status") == "completed":
-        translation_completed = True
-        # Also update the project in database for future queries
-        project.translation_completed = True
-        await db.commit()
-
     return WorkflowStatusResponse(
         project_id=project_id,
         current_step=project.current_step,
         has_reference_epub=project.has_reference_epub,
         analysis_completed=project.analysis_completed,
-        translation_completed=translation_completed,
+        translation_completed=project.translation_completed,
         proofreading_completed=project.proofreading_completed,
         analysis_progress=analysis_progress,
         translation_progress=translation_progress,
@@ -241,6 +232,64 @@ async def _get_proofreading_progress(db: AsyncSession, project_id: str) -> dict:
         "round_number": session.round_number,
         "progress": session.progress,
         "pending_suggestions": pending_count,
+    }
+
+
+@router.post("/workflow/{project_id}/confirm-translation")
+async def confirm_translation(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm translation completion and advance to proofreading step."""
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if there's any translation content
+    translation_progress = await _get_translation_progress(db, project_id)
+    if not translation_progress.get("has_task") or translation_progress.get("completed_paragraphs", 0) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot confirm translation: no translated content found"
+        )
+
+    # Mark translation as completed
+    project.translation_completed = True
+    project.current_step = "proofreading"
+    await db.commit()
+
+    return {
+        "project_id": project_id,
+        "translation_completed": True,
+        "current_step": project.current_step,
+    }
+
+
+@router.post("/workflow/{project_id}/reset-translation-status")
+async def reset_translation_status(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset translation completion status back to in-progress."""
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Reset translation completed status
+    project.translation_completed = False
+    project.current_step = "translation"
+    await db.commit()
+
+    return {
+        "project_id": project_id,
+        "translation_completed": False,
+        "current_step": project.current_step,
     }
 
 

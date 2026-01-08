@@ -89,25 +89,39 @@ export function ExportPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-        <div>
-          <h2 className="text-lg font-medium">{t('export.title')}</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t('export.subtitle')}</p>
+      {/* Action Bar - unified format */}
+      <div className="flex items-center justify-between mb-4 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+        {/* Left side: Title and status */}
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('export.title')}</h2>
+          {isComplete ? (
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded text-sm">
+              <CheckCircle className="w-3.5 h-3.5" />
+              {t('export.readyToExport')}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded text-sm">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {progressPercent}%
+            </span>
+          )}
         </div>
 
-        <button
-          onClick={() => exportMutation.mutate()}
-          disabled={exportMutation.isPending || !isComplete}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed"
-        >
-          {exportMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
-          {t('export.downloadEpub')}
-        </button>
+        {/* Right side: Action buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportMutation.mutate()}
+            disabled={exportMutation.isPending || !isComplete}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-sm"
+          >
+            {exportMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            {t('export.downloadEpub')}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
@@ -142,7 +156,7 @@ export function ExportPage() {
               {t('export.translationStatus')}
             </h3>
 
-            <div className="mb-2">
+            <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-500 dark:text-gray-400">{t('export.progress')}</span>
                 <span className="font-medium">{progressPercent}%</span>
@@ -156,20 +170,6 @@ export function ExportPage() {
               <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                 {completedParagraphs} / {totalParagraphs} {t('export.paragraphsTranslated')}
               </div>
-            </div>
-
-            <div className={`flex items-center gap-2 p-2 rounded ${isComplete ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-              {isComplete ? (
-                <>
-                  <CheckCircle className="w-4 h-4" />
-                  <span className="text-sm">{t('export.readyToExport')}</span>
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="w-4 h-4" />
-                  <span className="text-sm">{t('export.translationIncomplete')}</span>
-                </>
-              )}
             </div>
           </div>
 

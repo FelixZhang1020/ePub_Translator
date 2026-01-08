@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import get_db, ReferenceEPUB
 from app.core.matching.service import matching_service
-from app.core.epub.parser import EPUBParser
+from app.core.epub import EPUBParser
 
 router = APIRouter()
 

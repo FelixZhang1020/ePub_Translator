@@ -115,29 +115,75 @@ class BookAnalysisContext(BaseModel):
         Returns:
             Structured BookAnalysisContext instance
         """
+        import json
+
+        def to_string(value: Any) -> Optional[str]:
+            """Convert value to string, handling dicts and other types."""
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                # Convert dict to formatted JSON string
+                return json.dumps(value, ensure_ascii=False, indent=2)
+            return str(value)
+
+        def to_terminology_dict(value: Any) -> Dict[str, str]:
+            """Convert terminology to dict format."""
+            if value is None:
+                return {}
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, list):
+                # Convert list of term dicts to simple dict
+                result = {}
+                for item in value:
+                    if isinstance(item, dict):
+                        # Handle format: {"english_term": "X", "recommended_chinese": "Y"}
+                        en = item.get("english_term") or item.get("english") or item.get("term")
+                        zh = item.get("recommended_chinese") or item.get("chinese") or item.get("translation")
+                        if en and zh:
+                            result[en] = zh
+                return result
+            return {}
+
+        def to_guidelines_list(value: Any) -> List[str]:
+            """Convert guidelines to list format."""
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return [str(item) if not isinstance(item, str) else item for item in value]
+            if isinstance(value, str):
+                return [value]
+            return []
+
         # Extract translation principles if present
         principles = None
-        if raw.get("translation_principles"):
-            tp = raw["translation_principles"]
-            principles = TranslationPrinciples(
-                priority_order=tp.get("priority_order", ["faithfulness", "expressiveness", "elegance"]),
-                faithfulness_boundary=tp.get("faithfulness_boundary"),
-                permissible_adaptation=tp.get("permissible_adaptation"),
-                style_constraints=tp.get("style_constraints"),
-                red_lines=tp.get("red_lines"),
-            )
+        tp = raw.get("translation_principles")
+        if tp:
+            if isinstance(tp, dict):
+                principles = TranslationPrinciples(
+                    priority_order=tp.get("priority_order", ["faithfulness", "expressiveness", "elegance"]),
+                    faithfulness_boundary=to_string(tp.get("faithfulness_boundary") or tp.get("must_be_literal")),
+                    permissible_adaptation=to_string(tp.get("permissible_adaptation") or tp.get("allowed_adjustment")),
+                    style_constraints=to_string(tp.get("style_constraints")),
+                    red_lines=to_string(tp.get("red_lines")),
+                )
+
+        # Extract work_profile fields if present
+        work_profile = raw.get("work_profile", {})
 
         return cls(
-            author_name=raw.get("author_name"),
-            author_biography=raw.get("author_biography"),
-            writing_style=raw.get("writing_style"),
-            tone=raw.get("tone"),
-            genre=raw.get("genre"),
-            target_audience=raw.get("target_audience"),
-            genre_conventions=raw.get("genre_conventions"),
-            key_terminology=raw.get("key_terminology", {}),
+            author_name=to_string(raw.get("author_name") or raw.get("meta", {}).get("author")),
+            author_biography=to_string(raw.get("author_biography")),
+            writing_style=to_string(raw.get("writing_style") or work_profile.get("writing_style")),
+            tone=to_string(raw.get("tone") or work_profile.get("tone")),
+            genre=to_string(raw.get("genre") or work_profile.get("genre")),
+            target_audience=to_string(raw.get("target_audience") or work_profile.get("target_audience")),
+            genre_conventions=to_string(raw.get("genre_conventions")),
+            key_terminology=to_terminology_dict(raw.get("key_terminology")),
             translation_principles=principles,
-            custom_guidelines=raw.get("custom_guidelines", []),
+            custom_guidelines=to_guidelines_list(raw.get("custom_guidelines") or raw.get("custom_watchlist")),
         )
 
     def has_content(self) -> bool:

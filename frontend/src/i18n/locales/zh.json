@@ -17,7 +17,8 @@
     "error": "错误",
     "show": "显示",
     "hide": "隐藏",
-    "progress": "进度"
+    "progress": "进度",
+    "items": "项"
   },
   "app": {
     "title": "EPUB 翻译工具"
@@ -38,7 +39,8 @@
     "unknownAuthor": "未知作者",
     "chapters": "章",
     "paragraphs": "段落",
-    "confirmDelete": "确定要删除「{{name}}」吗？"
+    "confirmDelete": "确定要删除「{{name}}」吗？",
+    "favorite": "切换收藏"
   },
   "upload": {
     "title": "上传 EPUB",
@@ -205,7 +207,11 @@
     "expandContext": "展开全文",
     "collapseContext": "收起",
     "retranslate": "重译",
-    "retranslating": "重译中..."
+    "retranslating": "重译中...",
+    "completeTranslation": "完成翻译",
+    "translationConfirmed": "已完成",
+    "continueTranslating": "继续翻译",
+    "resetTranslationStatus": "重置状态以继续翻译"
   },
   "preview": {
     "chapterList": "章节列表",
@@ -227,7 +233,9 @@
     "translation": "翻译",
     "proofreading": "校对",
     "export": "导出",
-    "continueToTranslation": "继续翻译"
+    "continueToTranslation": "继续翻译",
+    "continueToProofreading": "继续校对",
+    "continueToExport": "完成校对"
   },
   "analysis": {
     "llmConfig": "LLM 配置",
@@ -250,6 +258,10 @@
     "noFields": "暂无分析字段",
     "analyzing": "分析中",
     "preview": "预览",
+    "themes": "主题",
+    "summary": "摘要",
+    "noData": "暂无数据",
+    "terms": "条术语",
     "progress": {
       "loading": "加载项目",
       "sampling": "采样段落",
@@ -330,7 +342,7 @@
     "userPrompt": "用户提示词",
     "variables": "变量",
     "reset": "重置",
-    "send": "发送",
+    "send": "执行",
     "modified": "已修改",
     "refreshPreview": "刷新预览",
     "renderedPreview": "渲染预览",
@@ -342,7 +354,25 @@
     "viewPrompt": "查看提示词",
     "editPrompt": "编辑提示词",
     "save": "保存",
-    "saved": "已保存"
+    "saved": "已保存",
+    "selectTemplate": "模板",
+    "defaultTemplate": "默认",
+    "builtinTemplate": "系统默认",
+    "projectCustom": "项目自定义",
+    "loading": "加载中...",
+    "reformedTheologyTemplate": "改革宗翻译家",
+    "projectDefault": "项目默认",
+    "globalDefault": "全局默认",
+    "hasProjectPrompt": "项目有自定义提示词",
+    "usingProjectUserPrompt": "使用项目专属用户提示词",
+    "usingDefaultUserPrompt": "使用默认用户提示词",
+    "priorityChain": "用户提示词来源",
+    "fromTemplate": "来自模板",
+    "available": "可用",
+    "notConfigured": "未配置",
+    "systemModified": "系统提示词已修改",
+    "userModified": "用户提示词已修改",
+    "projectUserPrompt": "项目用户提示词"
   },
   "promptManagement": {
     "title": "提示词管理",
@@ -357,6 +387,10 @@
     "deleteTemplate": "删除模板",
     "templateName": "模板名称",
     "templateNamePlaceholder": "例如：翻译专家",
+    "displayName": "显示名称",
+    "displayNamePlaceholder": "例如：我的翻译风格",
+    "fileName": "文件名",
+    "fileNameHint": "仅限小写字母、数字和连字符",
     "description": "描述",
     "descriptionPlaceholder": "模板的简要描述...",
     "category": "分类",
@@ -379,6 +413,7 @@
     "inheritFromTemplate": "继承自模板",
     "confirmDelete": "确定要删除此模板吗？",
     "cannotDeleteBuiltin": "内置模板不能删除",
+    "setAsDefault": "设为默认",
     "syncFromFiles": "从文件同步",
     "syncing": "同步中...",
     "syncSuccess": "模板同步成功",
@@ -414,6 +449,8 @@
       "json": "JSON"
     },
     "noVariables": "尚未定义变量",
-    "addFirstVariable": "添加第一个自定义变量"
+    "addFirstVariable": "添加第一个自定义变量",
+    "resetToDefault": "恢复默认",
+    "confirmResetPrompt": "确定要将此提示词恢复为默认模板吗？您的自定义更改将会丢失。"
   }
 }
