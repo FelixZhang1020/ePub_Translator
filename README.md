@@ -1,9 +1,12 @@
 # ePub Translator / 电子书翻译器
 
-LLM-powered pipeline that translates English ePub books into Chinese while keeping layout, tone, and context intact. 基于大模型的英文 ePub → 中文全流程翻译工具，尽可能保留排版与语境。使用下方“语言标签”快速切换。
+LLM-powered pipeline that translates English ePub books into Chinese while keeping layout, tone, and context intact. 基于大模型的英文 ePub → 中文全流程翻译工具，尽可能保留排版与语境。
 
-<details open>
-<summary>English</summary>
+## Language / 语言
+- [English](#english-version)
+- [中文](#中文版本)
+
+## English Version
 
 ### Overview
 ePub Translator is a full-stack app that analyzes, translates, and proofreads ePub books, then exports bilingual output. It supports multiple LLM providers and reference matching to keep terminology consistent across chapters.
@@ -141,10 +144,7 @@ Templates support `{{variable}}` substitution:
 ### License
 MIT
 
-</details>
-
-<details>
-<summary>中文</summary>
+## 中文版本
 
 ### 概览
 ePub Translator 是一个全栈应用，自动完成电子书的分析、翻译、校对与双语导出，可按章节跟踪状态，并支持多家大模型。
@@ -281,5 +281,3 @@ epub_translator/
 
 ### 许可证
 MIT
-
-</details>
