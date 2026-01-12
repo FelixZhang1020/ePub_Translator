@@ -243,6 +243,14 @@ class TranslationOrchestrator:
                 if self.resume and para.latest_translation:
                     continue
 
+                # Skip confirmed translations - they should never be changed
+                if para.latest_translation and para.latest_translation.is_confirmed:
+                    logger.info(f"[Orchestrator] Skipping confirmed translation for paragraph {para.id}")
+                    task.completed_paragraphs += 1
+                    task.progress = task.completed_paragraphs / task.total_paragraphs
+                    await db.commit()
+                    continue
+
                 # Translate paragraph
                 await self._translate_paragraph(
                     db=db,

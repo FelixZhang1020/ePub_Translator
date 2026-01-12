@@ -15,11 +15,22 @@ function HeaderStepIndicator({
 }) {
   const { t } = useTranslation()
 
-  // Check if translation is actively running
-  const isTranslating = status.translationProgress?.hasTask &&
-    (status.translationProgress.status === 'processing' || status.translationProgress.status === 'pending')
+  // Get analysis running state from global store
+  const isAnalyzing = useAppStore((state) => state.isAnalyzing)
 
-  // Build steps array dynamically - insert "translating" node when translation is running
+  // Check if any step is actively running
+  const translationStatus = status.translationProgress?.status
+  const isTranslationRunning = status.translationProgress?.hasTask &&
+    (translationStatus === 'processing' || translationStatus === 'pending')
+
+  const proofreadingStatus = status.proofreadingProgress?.status
+  const isProofreadingRunning = status.proofreadingProgress?.hasSession &&
+    (proofreadingStatus === 'processing' || proofreadingStatus === 'pending')
+
+  // Translation is only marked as finished when user explicitly clicks "Complete Translation" button
+  const translationFinished = status.translationCompleted
+
+  // Build steps array - fixed structure
   const steps = useMemo(() => {
     const baseSteps = [
       { id: 'analysis', icon: BookOpen, label: t('workflow.analysis') },
@@ -28,53 +39,43 @@ function HeaderStepIndicator({
       { id: 'export', icon: Download, label: t('workflow.export') },
     ]
 
-    // Insert "translating" node between translation and proofreading when translation is running
-    if (isTranslating) {
-      baseSteps.splice(2, 0, {
-        id: 'translating',
-        icon: Loader2,
-        label: t('workflow.translating'),
-      })
-    }
-
     return baseSteps
-  }, [t, isTranslating])
+  }, [t])
 
   // Status types:
   // - completed: Step is fully done (green checkmark)
-  // - in_progress: Step is actively being processed (animated)
+  // - in_progress: Step is actively being processed (animated orange spinning)
   // - current: On this step but not processing
   // - upcoming: Not accessible yet
   const getStepStatus = (stepId: string): 'completed' | 'in_progress' | 'current' | 'upcoming' => {
-    // Analysis: completed when confirmed, regardless of current page
+    // Analysis: show in_progress when analyzing (highest priority), then completed when confirmed
     if (stepId === 'analysis') {
+      // Show orange spinning when LLM is actively analyzing (check this first!)
+      if (isAnalyzing) return 'in_progress'
       if (status.analysisCompleted) return 'completed'
       if (status.currentStep === 'analysis') return 'current'
       return 'upcoming'
     }
 
-    // Translation: completed when done or when actively translating (show as completed to make room for "translating" node)
+    // Translation: show in_progress while running (highest priority), then completed when finished
     if (stepId === 'translation') {
-      if (status.translationCompleted) return 'completed'
-      // When translation is running, mark the translation step as completed
-      // so the "translating" node shows as in_progress
-      if (isTranslating) return 'completed'
+      // Show orange spinning when LLM is actively translating (check this first!)
+      if (isTranslationRunning) return 'in_progress'
+      if (translationFinished) return 'completed'
       if (status.currentStep === 'translation') return 'current'
       return 'upcoming'
     }
 
-    // Translating (dynamic node): always in_progress when it exists
-    if (stepId === 'translating') {
-      return 'in_progress'
-    }
-
-    // Proofreading and Export: keep simple for now
+    // Proofreading: show in_progress while running (highest priority), then completed when finished
     if (stepId === 'proofreading') {
+      // Show orange spinning when LLM is actively proofreading (check this first!)
+      if (isProofreadingRunning) return 'in_progress'
       if (status.proofreadingCompleted) return 'completed'
       if (status.currentStep === 'proofreading') return 'current'
       return 'upcoming'
     }
 
+    // Export: simple state for now (no LLM processing)
     if (stepId === 'export') {
       if (status.currentStep === 'export') return 'current'
       return 'upcoming'
@@ -84,16 +85,13 @@ function HeaderStepIndicator({
   }
 
   const canNavigate = (stepId: string): boolean => {
-    // The "translating" dynamic node is not clickable
-    if (stepId === 'translating') return false
-
     const stepOrder = ['analysis', 'translation', 'proofreading', 'export']
     const currentIndex = stepOrder.indexOf(status.currentStep)
     const targetIndex = stepOrder.indexOf(stepId)
     if (targetIndex <= currentIndex) return true
     if (stepId === 'translation') return status.analysisCompleted
     if (stepId === 'proofreading') return status.translationCompleted
-    if (stepId === 'export') return true
+    if (stepId === 'export') return status.proofreadingCompleted
     return false
   }
 
@@ -143,11 +141,6 @@ function HeaderStepIndicator({
               >
                 {stepStatus === 'completed' ? (
                   <Check className="w-3.5 h-3.5" />
-                ) : stepStatus === 'in_progress' && step.id === 'translating' ? (
-                  // Show percentage for translating node
-                  <span className="text-[9px] font-bold">
-                    {Math.round((status.translationProgress?.progress || 0) * 100)}%
-                  </span>
                 ) : stepStatus === 'in_progress' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
@@ -187,7 +180,6 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const fontSize = useAppStore((state) => state.fontSize)
-  const translationProgress = useAppStore((state) => state.translationProgress)
   const workflowStatus = useAppStore((state) => state.workflowStatus)
   const globalFontClass = globalFontSizeClass[fontSize]
   const fontClasses = fontSizeClasses[fontSize]

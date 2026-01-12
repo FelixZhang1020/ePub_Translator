@@ -116,12 +116,15 @@ export function PreviewModal({ isOpen, onClose, projectId }: PreviewModalProps) 
                       <button
                         key={chapter.id}
                         onClick={() => setSelectedChapter(chapter.id)}
-                        className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                        className={`relative w-full text-left px-3 py-2 rounded text-sm transition-colors ${
                           selectedChapter === chapter.id
-                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-50 font-semibold'
                             : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                         }`}
                       >
+                        {selectedChapter === chapter.id && (
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l" />
+                        )}
                         <div className="font-medium truncate">
                           {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
                         </div>

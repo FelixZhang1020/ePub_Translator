@@ -17,6 +17,7 @@ from app.models.database.chapter import Chapter
 from app.models.database.paragraph import Paragraph
 from app.core.epub.generator import EPUBGenerator
 from app.core.epub.reconstructor import EPUBReconstructor, BilingualEPUBBuilder, TranslationMapping
+from app.core.project_storage import ProjectStorage
 
 router = APIRouter()
 
@@ -38,14 +39,21 @@ async def export_bilingual_epub(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Export project as bilingual EPUB."""
+    """Export project as bilingual EPUB (legacy method).
+
+    Note: This uses the older EPUBGenerator. Consider using /export/{project_id}/v2 instead.
+    """
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     try:
-        generator = EPUBGenerator(project_id, db)
+        # Ensure exports directory exists
+        exports_dir = ProjectStorage.get_exports_dir(project_id)
+        exports_dir.mkdir(parents=True, exist_ok=True)
+
+        generator = EPUBGenerator(project_id, db, exports_dir)
         output_path = await generator.generate()
 
         return FileResponse(
@@ -132,13 +140,13 @@ async def export_epub_v2(
                 detail="No translations found. Please translate content first."
             )
 
-        # Determine output path
-        output_dir = settings.output_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure exports directory exists
+        exports_dir = ProjectStorage.get_exports_dir(project_id)
+        exports_dir.mkdir(parents=True, exist_ok=True)
 
         if format == ExportFormat.TRANSLATED:
             # Translated only - uses EPUBReconstructor
-            output_path = output_dir / f"{project.id}_translated.epub"
+            output_path = ProjectStorage.get_translated_epub_path(project_id)
             reconstructor = EPUBReconstructor(
                 original_epub=original_path,
                 translations=translations,
@@ -148,7 +156,7 @@ async def export_epub_v2(
             filename = f"{project.name}_translated.epub"
         else:
             # Bilingual - uses BilingualEPUBBuilder
-            output_path = output_dir / f"{project.id}_bilingual_v2.epub"
+            output_path = ProjectStorage.get_bilingual_epub_path(project_id)
             builder = BilingualEPUBBuilder(
                 original_epub=original_path,
                 translations=translations,

@@ -43,18 +43,35 @@ class SuggestionResponse(BaseModel):
     id: str
     paragraph_id: str
     original_text: Optional[str] = None
-    original_translation: str
-    suggested_translation: str
+    original_translation: str  # Snapshot when suggestion was created
+    current_translation: Optional[str] = None  # Actual current translation (may be edited)
+    suggested_translation: Optional[str] = None  # Nullable for comment-only workflow
     explanation: Optional[str] = None
     status: str
     user_modified_text: Optional[str] = None
     created_at: str
+    improvement_level: Optional[str] = None
+    issue_types: Optional[list[str]] = None
+    is_confirmed: bool = False  # Whether the translation is locked
 
 
 class UpdateSuggestionRequest(BaseModel):
     """Request to update a suggestion."""
     action: str  # "accept", "reject", or "modify"
     modified_text: Optional[str] = None
+
+
+class QuickRecommendationRequest(BaseModel):
+    """Request for a quick LLM recommendation."""
+    original_text: str
+    current_translation: str
+    feedback: str
+    config_id: Optional[str] = None
+
+
+class QuickRecommendationResponse(BaseModel):
+    """Response with LLM recommendation."""
+    recommended_translation: str
 
 
 class ApplyResult(BaseModel):
@@ -256,6 +273,8 @@ async def update_suggestion(
             status=suggestion.status,
             user_modified_text=suggestion.user_modified_text,
             created_at=suggestion.created_at.isoformat(),
+            improvement_level=suggestion.improvement_level,
+            issue_types=suggestion.issue_types,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -279,3 +298,103 @@ async def get_pending_count(
     """Get count of pending suggestions for a project."""
     count = await proofreading_service.get_project_pending_count(db, project_id)
     return {"pending_count": count}
+
+
+@router.post("/proofreading/session/{session_id}/cancel")
+async def cancel_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ProofreadingSessionResponse:
+    """Cancel a running proofreading session."""
+    try:
+        session = await proofreading_service.cancel_session(db, session_id)
+        return ProofreadingSessionResponse(
+            id=session.id,
+            project_id=session.project_id,
+            provider=session.provider,
+            model=session.model,
+            status=session.status,
+            round_number=session.round_number,
+            progress=session.progress,
+            total_paragraphs=session.total_paragraphs,
+            completed_paragraphs=session.completed_paragraphs,
+            error_message=session.error_message,
+            created_at=session.created_at.isoformat(),
+            started_at=session.started_at.isoformat() if session.started_at else None,
+            completed_at=session.completed_at.isoformat() if session.completed_at else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/proofreading/quick-recommendation")
+async def get_quick_recommendation(
+    request: QuickRecommendationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> QuickRecommendationResponse:
+    """Get a quick LLM recommendation for improving a translation.
+
+    Uses a simple prompt with original text, current translation, and feedback
+    to generate an improved translation.
+    """
+    import os
+    from litellm import acompletion
+
+    # Resolve LLM configuration
+    try:
+        llm_config = await LLMConfigService.resolve_config(
+            db,
+            config_id=request.config_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Create a simple prompt for the recommendation
+    prompt = f"""Based on the feedback provided, improve the translation.
+
+Original text:
+{request.original_text}
+
+Current translation:
+{request.current_translation}
+
+Feedback:
+{request.feedback}
+
+Please provide an improved translation that addresses the feedback. Output ONLY the improved translation, nothing else."""
+
+    # Build litellm model string
+    provider = llm_config.provider
+    model = llm_config.model
+    if provider in ["openai", "anthropic", "gemini", "deepseek"]:
+        litellm_model = model
+    else:
+        litellm_model = f"{provider}/{model}"
+
+    # Set API key
+    if llm_config.api_key:
+        provider_env_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+        }
+        env_var = provider_env_map.get(provider, f"{provider.upper()}_API_KEY")
+        os.environ[env_var] = llm_config.api_key
+
+    try:
+        response = await acompletion(
+            model=litellm_model,
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+        )
+
+        recommended_translation = response.choices[0].message.content.strip()
+
+        return QuickRecommendationResponse(
+            recommended_translation=recommended_translation
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get recommendation: {str(e)}")

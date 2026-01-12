@@ -6,6 +6,7 @@ from app.models.database.chapter import Chapter
 from app.models.database.paragraph import Paragraph
 from app.models.database.translation import Translation, TranslationTask
 from app.models.database.book_analysis import BookAnalysis
+from app.models.database.analysis_task import AnalysisTask
 from app.models.database.reference_epub import ReferenceEPUB
 from app.models.database.paragraph_match import ParagraphMatch
 from app.models.database.translation_conversation import (
@@ -43,6 +44,7 @@ __all__ = [
     "Translation",
     "TranslationTask",
     "BookAnalysis",
+    "AnalysisTask",
     "ReferenceEPUB",
     "ParagraphMatch",
     "TranslationConversation",

@@ -527,6 +527,26 @@ class VariableService:
             return value
 
     @classmethod
+    def is_value_effective(cls, value: Any) -> bool:
+        """Check if a value is considered 'effective' (non-empty).
+
+        Args:
+            value: Value to check
+
+        Returns:
+            True if value is non-empty/non-null, False otherwise
+        """
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return len(value.strip()) > 0
+        if isinstance(value, (list, dict)):
+            return len(value) > 0
+        if isinstance(value, bool):
+            return True  # Booleans are always effective
+        return True  # Numbers, etc.
+
+    @classmethod
     async def get_available_variables(
         cls,
         db: AsyncSession,

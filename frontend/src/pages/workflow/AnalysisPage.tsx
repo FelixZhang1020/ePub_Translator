@@ -3,7 +3,7 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Play, Check, RefreshCw, ArrowRight, BookOpen, FileText } from 'lucide-react'
 import { api, Project, WorkflowStatus, AnalysisProgressEvent } from '../../services/api/client'
-import { useTranslation } from '../../stores/appStore'
+import { useTranslation, useAppStore } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
@@ -12,6 +12,7 @@ import { AnalysisFieldCard } from '../../components/workflow/AnalysisFieldCard'
 interface OutletContext {
   project: Project
   workflowStatus: WorkflowStatus
+  refetchWorkflow: () => void
 }
 
 // Progress step labels for display
@@ -45,7 +46,7 @@ export function AnalysisPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { t } = useTranslation()
-  const { project } = useOutletContext<OutletContext>()
+  const { project, workflowStatus, refetchWorkflow } = useOutletContext<OutletContext>()
 
   // LLM config from settings store
   const { getActiveConfig, getActiveConfigId } = useSettingsStore()
@@ -53,13 +54,16 @@ export function AnalysisPage() {
   const configId = getActiveConfigId()
   const hasLLMConfig = !!(activeConfig && activeConfig.hasApiKey)
 
+  // Global analyzing state for header display
+  const setGlobalIsAnalyzing = useAppStore((state) => state.setIsAnalyzing)
+
   // Form state - stores the raw_analysis as editable form data
   const [formData, setFormData] = useState<Record<string, unknown>>({})
 
   // Prompt preview state
   const [showPromptPreview, setShowPromptPreview] = useState(false)
 
-  // Streaming progress state
+  // Streaming state
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [progressEvent, setProgressEvent] = useState<AnalysisProgressEvent | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
@@ -80,11 +84,31 @@ export function AnalysisPage() {
     }
   }, [analysis])
 
+  // Cancel any processing task on mount (after page refresh)
+  useEffect(() => {
+    const analysisProgress = workflowStatus?.analysis_progress
+    if (analysisProgress?.status === 'processing' && projectId) {
+      // User refreshed during analysis - cancel it
+      api.cancelAnalysisTask(projectId).catch(console.error)
+      refetchWorkflow()
+    }
+  }, []) // Only run on mount
+
+  // Sync analyzing state to global store for header display
+  useEffect(() => {
+    setGlobalIsAnalyzing(isAnalyzing)
+    return () => {
+      // Clear analyzing state when leaving the page
+      setGlobalIsAnalyzing(false)
+    }
+  }, [isAnalyzing, setGlobalIsAnalyzing])
+
   // Cleanup abort on unmount
   useEffect(() => {
     return () => {
       if (abortRef.current) {
         abortRef.current.abort()
+        abortRef.current = null
       }
     }
   }, [])
@@ -97,7 +121,8 @@ export function AnalysisPage() {
     setProgressEvent(null)
     setAnalysisError(null)
 
-    // Reset analysis query to clear previous confirmed state
+    // Clear form data and cache immediately to show empty state during re-analysis
+    setFormData({})
     queryClient.setQueryData(['analysis', projectId], null)
 
     const stream = api.startAnalysisStream(
@@ -108,25 +133,30 @@ export function AnalysisPage() {
         custom_system_prompt: customSystemPrompt,
         custom_user_prompt: customUserPrompt,
       },
-      // onProgress
+      // onProgress - real-time SSE updates
       (event) => {
         setProgressEvent(event)
       },
       // onComplete
       (rawAnalysis) => {
         setIsAnalyzing(false)
+        abortRef.current = null
+        setProgressEvent(null)
         setFormData(rawAnalysis)
         queryClient.invalidateQueries({ queryKey: ['analysis', projectId] })
+        refetchWorkflow()
       },
       // onError
       (error) => {
         setIsAnalyzing(false)
+        abortRef.current = null
+        setProgressEvent(null)
         setAnalysisError(error)
       }
     )
 
     abortRef.current = stream
-  }, [projectId, configId, queryClient])
+  }, [projectId, configId, queryClient, refetchWorkflow])
 
   // Handler for prompt confirmation
   const handlePromptConfirm = (systemPrompt?: string, userPrompt?: string) => {
@@ -140,14 +170,26 @@ export function AnalysisPage() {
   }
 
   // Cancel analysis
-  const handleCancelAnalysis = useCallback(() => {
+  const handleCancelAnalysis = useCallback(async () => {
+    setIsAnalyzing(false)
+    setProgressEvent(null)
+
+    // Abort SSE stream if active
     if (abortRef.current) {
       abortRef.current.abort()
       abortRef.current = null
     }
-    setIsAnalyzing(false)
-    setProgressEvent(null)
-  }, [])
+
+    // Call backend cancel API
+    if (projectId) {
+      try {
+        await api.cancelAnalysisTask(projectId)
+        refetchWorkflow()
+      } catch (error) {
+        console.error('Failed to cancel analysis task:', error)
+      }
+    }
+  }, [projectId, refetchWorkflow])
 
   // Update/save state
   const [isSaving, setIsSaving] = useState(false)
@@ -192,7 +234,10 @@ export function AnalysisPage() {
     navigate(`/project/${projectId}/translate`)
   }
 
-  const hasAnalysis = analysis && !fetchError
+  // Check if analysis has actual content (not just an empty record)
+  const hasAnalysisContent = analysis?.raw_analysis &&
+    Object.keys(analysis.raw_analysis).length > 0
+  const hasAnalysis = analysis && !fetchError && hasAnalysisContent
 
   // Get all fields from formData, excluding internal fields
   const analysisFields = Object.entries(formData).filter(
@@ -329,46 +374,48 @@ export function AnalysisPage() {
         </div>
       )}
 
-      {/* Analysis Results */}
-      {analysisLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-        </div>
-      ) : hasAnalysis ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            {t('analysis.results')}
-          </h3>
-
-          {/* Dynamic fields rendering with cards */}
-          <div className="space-y-4">
-            {analysisFields.map(([key, value]) => (
-              <AnalysisFieldCard
-                key={key}
-                fieldKey={key}
-                value={value}
-                onChange={handleFieldChange}
-                i18nKey={FIELD_I18N_KEYS[key]}
-              />
-            ))}
-
-            {analysisFields.length === 0 && (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                {t('analysis.noFields')}
-              </p>
-            )}
+      {/* Analysis Results - hide when analyzing */}
+      {!isAnalyzing && (
+        analysisLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-12 shadow-sm border border-gray-200 dark:border-gray-700 text-center">
-          <BookOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-            {t('analysis.noAnalysis')}
-          </h3>
-          <p className="text-gray-600 dark:text-gray-400">
-            {t('analysis.selectLLMAndStart')}
-          </p>
-        </div>
+        ) : hasAnalysis ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
+              {t('analysis.results')}
+            </h3>
+
+            {/* Dynamic fields rendering with cards */}
+            <div className="space-y-4">
+              {analysisFields.map(([key, value]) => (
+                <AnalysisFieldCard
+                  key={key}
+                  fieldKey={key}
+                  value={value}
+                  onChange={handleFieldChange}
+                  i18nKey={FIELD_I18N_KEYS[key]}
+                />
+              ))}
+
+              {analysisFields.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
+                  {t('analysis.noFields')}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-12 shadow-sm border border-gray-200 dark:border-gray-700 text-center">
+            <BookOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+              {t('analysis.noAnalysis')}
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              {t('analysis.selectLLMAndStart')}
+            </p>
+          </div>
+        )
       )}
 
       {/* Prompt Preview Modal */}
@@ -378,12 +425,14 @@ export function AnalysisPage() {
         promptType="analysis"
         projectId={projectId}
         variables={{
-          project: {
-            title: project?.name || '',
-            author: project?.author || '',
-            author_background: '',
-          },
+          // Simple keys for backwards compatibility
+          title: project?.epub_title || project?.name || '',
+          author: project?.epub_author || '',
           sample_paragraphs: '(Sample paragraphs will be loaded during analysis)',
+          // Namespaced keys (canonical format)
+          'project.title': project?.epub_title || project?.name || '',
+          'project.author': project?.epub_author || '',
+          'content.sample_paragraphs': '(Sample paragraphs will be loaded during analysis)',
         }}
         onConfirm={handlePromptConfirm}
         isLoading={isAnalyzing}

@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.database import get_db, Project, BookAnalysis, TranslationTask
+from app.models.database import get_db, Project, BookAnalysis, TranslationTask, AnalysisTask
+from app.models.database.translation import TaskStatus
 from app.models.database.proofreading import ProofreadingSession, ProofreadingSuggestion, SuggestionStatus
 
 router = APIRouter()
@@ -58,18 +59,8 @@ async def get_workflow_status(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Get analysis progress
-    analysis_progress = None
-    if project.analysis:
-        analysis_progress = {
-            "exists": True,
-            "confirmed": project.analysis.user_confirmed,
-        }
-    else:
-        analysis_progress = {
-            "exists": False,
-            "confirmed": False,
-        }
+    # Get analysis progress (includes task status)
+    analysis_progress = await _get_analysis_progress(db, project_id)
 
     # Get translation progress
     translation_progress = await _get_translation_progress(db, project_id)
@@ -165,6 +156,42 @@ async def get_resume_position(
         "recommended_step": recommended_step,
         "reason": reason,
         "current_step": project.current_step,
+    }
+
+
+async def _get_analysis_progress(db: AsyncSession, project_id: str) -> dict:
+    """Get analysis progress details."""
+    # Get the latest analysis task
+    result = await db.execute(
+        select(AnalysisTask)
+        .where(AnalysisTask.project_id == project_id)
+        .order_by(AnalysisTask.created_at.desc())
+        .limit(1)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        return {
+            "has_task": False,
+            "exists": False,
+            "confirmed": False,
+        }
+
+    # Check if there's an analysis record
+    analysis_result = await db.execute(
+        select(BookAnalysis).where(BookAnalysis.project_id == project_id)
+    )
+    analysis = analysis_result.scalar_one_or_none()
+
+    return {
+        "has_task": True,
+        "task_id": task.id,
+        "status": task.status,  # processing, completed, failed, cancelled
+        "progress": task.progress,
+        "current_step": task.current_step,
+        "step_message": task.step_message,
+        "exists": analysis is not None,
+        "confirmed": analysis.user_confirmed if analysis else False,
     }
 
 
@@ -273,6 +300,30 @@ async def confirm_translation(
             detail="Cannot confirm translation: no translated content found"
         )
 
+    status = translation_progress.get("status")
+    completed_paragraphs = translation_progress.get("completed_paragraphs", 0) or 0
+    total_paragraphs = translation_progress.get("total_paragraphs", 0) or 0
+    progress = translation_progress.get("progress", 0.0) or 0.0
+
+    # Block confirmation while translation tasks are still running or incomplete
+    if status in (TaskStatus.PROCESSING.value, TaskStatus.PENDING.value):
+        raise HTTPException(
+            status_code=400,
+            detail="Translation is still in progress. Please wait until it finishes."
+        )
+
+    if total_paragraphs > 0 and completed_paragraphs < total_paragraphs:
+        raise HTTPException(
+            status_code=400,
+            detail="Translation task has not finished all assigned paragraphs."
+        )
+
+    if total_paragraphs == 0 and progress < 0.999:
+        raise HTTPException(
+            status_code=400,
+            detail="Translation task is not complete yet."
+        )
+
     # Mark translation as completed
     project.translation_completed = True
     project.current_step = "proofreading"
@@ -298,14 +349,50 @@ async def reset_translation_status(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Reset translation completed status
+    # Reset translation and proofreading completed status
+    # Going back to translation invalidates any proofreading work
     project.translation_completed = False
+    project.proofreading_completed = False
     project.current_step = "translation"
     await db.commit()
+    await db.refresh(project)
 
     return {
         "project_id": project_id,
         "translation_completed": False,
+        "proofreading_completed": False,
+        "current_step": project.current_step,
+    }
+
+
+@router.post("/workflow/{project_id}/confirm-proofreading")
+async def confirm_proofreading(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm proofreading completion and advance to export step."""
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Verify translation is completed first
+    if not project.translation_completed:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot confirm proofreading: translation must be completed first"
+        )
+
+    # Mark proofreading as completed
+    project.proofreading_completed = True
+    project.current_step = "export"
+    await db.commit()
+
+    return {
+        "project_id": project_id,
+        "proofreading_completed": True,
         "current_step": project.current_step,
     }
 
@@ -350,6 +437,49 @@ async def cancel_stuck_translation_tasks(
     }
 
 
+@router.post("/workflow/{project_id}/cancel-analysis-task")
+async def cancel_analysis_task(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel any active analysis task for the project."""
+    # Find project
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find active analysis task (processing status)
+    result = await db.execute(
+        select(AnalysisTask).where(
+            AnalysisTask.project_id == project_id,
+            AnalysisTask.status == "processing"
+        ).order_by(AnalysisTask.created_at.desc()).limit(1)
+    )
+    task = result.scalar_one_or_none()
+
+    if task:
+        task.status = "cancelled"
+        task.error_message = "Analysis cancelled by user"
+        from datetime import datetime, timezone
+        task.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        return {
+            "project_id": project_id,
+            "cancelled": True,
+            "message": "Analysis task cancelled successfully",
+        }
+    else:
+        return {
+            "project_id": project_id,
+            "cancelled": False,
+            "message": "No active analysis task found",
+        }
+
+
 def _validate_step_transition(project: Project, new_step: WorkflowStep) -> bool:
     """Validate if a step transition is allowed."""
     step_order = [
@@ -376,8 +506,6 @@ def _validate_step_transition(project: Project, new_step: WorkflowStep) -> bool:
         elif new_step == WorkflowStep.PROOFREADING:
             return project.translation_completed  # Need completed translation
         elif new_step == WorkflowStep.EXPORT:
-            # Can only export after proofreading is completed
-            # (or skip proofreading if translation is completed and user hasn't done proofreading)
-            return project.translation_completed  # At minimum need translation done
+            return project.proofreading_completed  # Need completed proofreading
 
     return False

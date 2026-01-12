@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import get_db, Project
 from app.core.epub import EPUBParserV2
+from app.core.project_storage import ProjectStorage
 
 router = APIRouter()
 
@@ -23,25 +24,25 @@ async def upload_epub(
     if not file.filename.endswith(".epub"):
         raise HTTPException(status_code=400, detail="Only EPUB files are allowed")
 
-    # Save file
-    file_path = settings.upload_dir / file.filename
-    with open(file_path, "wb") as buffer:
+    # Save to temporary location first (need project_id for final location)
+    temp_path = settings.upload_dir / f"temp_{file.filename}"
+    with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     try:
         # Parse EPUB with V2 parser (lxml-based)
-        parser = EPUBParserV2(file_path)
+        parser = EPUBParserV2(temp_path)
         metadata = await parser.get_metadata()
         chapters = await parser.extract_chapters()
 
         # Extract hierarchical TOC structure
         toc_structure = parser.extract_toc_structure()
 
-        # Create project
+        # Create project (without final file path yet)
         project = Project(
             name=metadata.get("title", file.filename),
             original_filename=file.filename,
-            original_file_path=str(file_path),
+            original_file_path="",  # Will be set after moving file
             epub_title=metadata.get("title"),
             epub_author=metadata.get("author"),
             epub_language=metadata.get("language"),
@@ -50,7 +51,17 @@ async def upload_epub(
             total_chapters=len(chapters),
         )
         db.add(project)
-        await db.flush()
+        await db.flush()  # Get project.id
+
+        # Initialize project directory structure
+        ProjectStorage.initialize_project_structure(project.id)
+
+        # Move file to project-scoped location
+        final_path = ProjectStorage.get_original_epub_path(project.id)
+        shutil.move(str(temp_path), str(final_path))
+
+        # Update project with final file path
+        project.original_file_path = str(final_path)
 
         # Save chapters and paragraphs
         total_paragraphs = await parser.save_to_db(db, project.id, chapters)
@@ -67,8 +78,8 @@ async def upload_epub(
         }
 
     except Exception as e:
-        # Clean up file on error
-        file_path.unlink(missing_ok=True)
+        # Clean up temporary file on error
+        temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -90,6 +101,10 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
             "total_paragraphs": p.total_paragraphs,
             "is_favorite": p.is_favorite,
             "created_at": p.created_at.isoformat(),
+            "epub_title": p.epub_title,
+            "epub_author": p.epub_author,
+            "epub_language": p.epub_language,
+            "author_background": p.author_background,
         }
         for p in projects
     ]
@@ -113,24 +128,28 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
         "author_background": project.author_background,
         "custom_prompts": project.custom_prompts,
         "created_at": project.created_at.isoformat(),
+        "epub_title": project.epub_title,
+        "epub_author": project.epub_author,
+        "epub_language": project.epub_language,
+        "is_favorite": project.is_favorite,
     }
 
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a project."""
+    """Delete a project and all its files."""
     from sqlalchemy import select, delete
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Delete file
-    Path(project.original_file_path).unlink(missing_ok=True)
-
-    # Delete from database (cascades to chapters, paragraphs, translations)
+    # Delete from database first (cascades to chapters, paragraphs, translations)
     await db.execute(delete(Project).where(Project.id == project_id))
     await db.commit()
+
+    # Delete all project files and directories
+    ProjectStorage.delete_project(project_id)
 
     return {"status": "deleted"}
 

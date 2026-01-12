@@ -285,9 +285,11 @@ export function PromptPreviewModal({
 
   // Handle confirm
   const handleConfirm = useCallback(() => {
-    // Use rendered prompts (with variables substituted)
-    onConfirm(systemPromptRendered, userPromptRendered)
-  }, [systemPromptRendered, userPromptRendered, onConfirm])
+    // Send the edited templates (not rendered) so backend can substitute per-item content
+    // The preview shows what the final prompt looks like, but we need the templates
+    // for backend to substitute actual paragraph content (content.source, content.target, etc.)
+    onConfirm(systemPromptEdited, userPromptEdited)
+  }, [systemPromptEdited, userPromptEdited, onConfirm])
 
   // Computed state
   const isSystemEdited = systemPromptEdited !== systemPromptOriginal

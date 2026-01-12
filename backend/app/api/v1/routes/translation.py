@@ -348,31 +348,46 @@ async def clear_chapter_translations(
     paragraph_ids = [row[0] for row in result.fetchall()]
 
     if not paragraph_ids:
-        return {"deleted_count": 0, "chapter_id": chapter_id}
+        return {"deleted_count": 0, "skipped_locked": 0, "chapter_id": chapter_id}
 
-    # Get all translation IDs for these paragraphs (needed for deleting related records)
+    # Get all translation IDs for these paragraphs that are NOT locked (is_confirmed = False)
+    # Locked translations should be preserved
     result = await db.execute(
-        select(Translation.id).where(Translation.paragraph_id.in_(paragraph_ids))
+        select(Translation.id).where(
+            Translation.paragraph_id.in_(paragraph_ids),
+            Translation.is_confirmed == False  # noqa: E712
+        )
     )
     translation_ids = [row[0] for row in result.fetchall()]
 
+    # Count locked translations that will be skipped
+    result = await db.execute(
+        select(Translation.id).where(
+            Translation.paragraph_id.in_(paragraph_ids),
+            Translation.is_confirmed == True  # noqa: E712
+        )
+    )
+    locked_count = len(result.fetchall())
+
     if translation_ids:
-        # First delete related records (conversations)
+        # First delete related records (conversations) for unlocked translations only
         delete_conv_stmt = delete(TranslationConversation).where(
             TranslationConversation.translation_id.in_(translation_ids)
         )
         await db.execute(delete_conv_stmt)
 
-    # Now delete the translations themselves
-    delete_stmt = delete(Translation).where(
-        Translation.paragraph_id.in_(paragraph_ids)
-    )
-    result = await db.execute(delete_stmt)
-    deleted_count = result.rowcount
+        # Now delete the unlocked translations themselves
+        delete_stmt = delete(Translation).where(
+            Translation.id.in_(translation_ids)
+        )
+        result = await db.execute(delete_stmt)
+        deleted_count = result.rowcount
+    else:
+        deleted_count = 0
 
     await db.commit()
 
-    return {"deleted_count": deleted_count, "chapter_id": chapter_id}
+    return {"deleted_count": deleted_count, "skipped_locked": locked_count, "chapter_id": chapter_id}
 
 
 # =============================================================================
@@ -450,6 +465,15 @@ async def retranslate_paragraph(
         if not paragraph:
             raise HTTPException(status_code=404, detail="Paragraph not found")
         logger.info(f"Retranslate: loaded paragraph {paragraph_id}")
+
+        # Check if the latest translation is confirmed (locked)
+        if paragraph.translations:
+            latest_translation = max(paragraph.translations, key=lambda t: t.version)
+            if latest_translation.is_confirmed:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot retranslate a confirmed translation. Unconfirm it first."
+                )
     except HTTPException:
         raise
     except Exception as e:
@@ -1322,6 +1346,167 @@ async def preview_paragraph_prompts(
         estimated_tokens=preview.get("estimated_tokens", 0),
         temperature=preview.get("temperature", 0.3),
         max_tokens=preview.get("max_tokens", 4096),
+    )
+
+
+class UpdateTranslationRequest(BaseModel):
+    """Request to update a translation."""
+    translated_text: str
+
+
+class ConfirmTranslationRequest(BaseModel):
+    """Request to confirm/lock a translation."""
+    is_confirmed: bool = True
+
+
+class TranslationResponse(BaseModel):
+    """Response for a translation."""
+    id: str
+    paragraph_id: str
+    translated_text: str
+    is_confirmed: bool
+    is_manual_edit: bool
+    version: int
+    provider: str
+    model: str
+    created_at: str
+
+
+@router.put("/translation/paragraph/{paragraph_id}")
+async def update_translation(
+    paragraph_id: str,
+    request: UpdateTranslationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TranslationResponse:
+    """Update the translation for a paragraph.
+
+    Creates a new translation version with the updated text.
+    Cannot update confirmed translations.
+    """
+    # Get the latest translation for this paragraph
+    result = await db.execute(
+        select(Translation)
+        .where(Translation.paragraph_id == paragraph_id)
+        .order_by(Translation.version.desc())
+        .limit(1)
+    )
+    latest_translation = result.scalar_one_or_none()
+
+    if not latest_translation:
+        raise HTTPException(status_code=404, detail="No translation found for this paragraph")
+
+    if latest_translation.is_confirmed:
+        raise HTTPException(status_code=400, detail="Cannot update a confirmed translation")
+
+    # Create a new version with the updated text
+    new_translation = Translation(
+        id=str(uuid.uuid4()),
+        paragraph_id=paragraph_id,
+        translated_text=request.translated_text,
+        mode=latest_translation.mode,
+        provider="manual",
+        model="user_edit",
+        tokens_used=0,
+        version=latest_translation.version + 1,
+        is_manual_edit=True,
+        is_confirmed=False,
+    )
+
+    db.add(new_translation)
+    await db.commit()
+    await db.refresh(new_translation)
+
+    return TranslationResponse(
+        id=new_translation.id,
+        paragraph_id=new_translation.paragraph_id,
+        translated_text=new_translation.translated_text,
+        is_confirmed=new_translation.is_confirmed,
+        is_manual_edit=new_translation.is_manual_edit,
+        version=new_translation.version,
+        provider=new_translation.provider,
+        model=new_translation.model,
+        created_at=new_translation.created_at.isoformat(),
+    )
+
+
+@router.put("/translation/paragraph/{paragraph_id}/confirm")
+async def confirm_translation(
+    paragraph_id: str,
+    request: ConfirmTranslationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TranslationResponse:
+    """Confirm/lock a translation to prevent changes.
+
+    Once confirmed, the translation cannot be changed by re-translation.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get the latest translation for this paragraph
+        result = await db.execute(
+            select(Translation)
+            .where(Translation.paragraph_id == paragraph_id)
+            .order_by(Translation.version.desc())
+            .limit(1)
+        )
+        latest_translation = result.scalar_one_or_none()
+
+        if not latest_translation:
+            raise HTTPException(status_code=404, detail="No translation found for this paragraph")
+
+        logger.info(f"Confirming translation {latest_translation.id} for paragraph {paragraph_id}, setting is_confirmed={request.is_confirmed}")
+
+        # Update the confirmed status
+        latest_translation.is_confirmed = request.is_confirmed
+        await db.commit()
+        await db.refresh(latest_translation)
+
+        return TranslationResponse(
+            id=latest_translation.id,
+            paragraph_id=latest_translation.paragraph_id,
+            translated_text=latest_translation.translated_text,
+            is_confirmed=latest_translation.is_confirmed,
+            is_manual_edit=latest_translation.is_manual_edit,
+            version=latest_translation.version,
+            provider=latest_translation.provider,
+            model=latest_translation.model,
+            created_at=latest_translation.created_at.isoformat(),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error confirming translation for paragraph {paragraph_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to confirm translation: {str(e)}")
+
+
+@router.get("/translation/paragraph/{paragraph_id}")
+async def get_translation(
+    paragraph_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> TranslationResponse:
+    """Get the latest translation for a paragraph."""
+    result = await db.execute(
+        select(Translation)
+        .where(Translation.paragraph_id == paragraph_id)
+        .order_by(Translation.version.desc())
+        .limit(1)
+    )
+    latest_translation = result.scalar_one_or_none()
+
+    if not latest_translation:
+        raise HTTPException(status_code=404, detail="No translation found for this paragraph")
+
+    return TranslationResponse(
+        id=latest_translation.id,
+        paragraph_id=latest_translation.paragraph_id,
+        translated_text=latest_translation.translated_text,
+        is_confirmed=latest_translation.is_confirmed,
+        is_manual_edit=latest_translation.is_manual_edit,
+        version=latest_translation.version,
+        provider=latest_translation.provider,
+        model=latest_translation.model,
+        created_at=latest_translation.created_at.isoformat(),
     )
 
 

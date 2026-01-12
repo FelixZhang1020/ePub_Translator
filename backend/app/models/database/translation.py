@@ -44,6 +44,7 @@ class Translation(Base):
     # Version control
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_manual_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # Locked translation
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

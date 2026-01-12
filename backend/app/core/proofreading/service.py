@@ -1,6 +1,7 @@
 """Proofreading service for reviewing translations and generating suggestions."""
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -22,6 +23,9 @@ from app.models.database.proofreading import (
     ImprovementLevel,
 )
 from app.core.prompts.loader import PromptLoader
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProofreadingService:
@@ -134,6 +138,12 @@ class ProofreadingService:
             session.started_at = datetime.utcnow()
             await db.commit()
 
+            # Get project for variables
+            result = await db.execute(
+                select(Project).where(Project.id == session.project_id)
+            )
+            project = result.scalar_one_or_none()
+
             # Get book analysis for context
             result = await db.execute(
                 select(BookAnalysis).where(BookAnalysis.project_id == session.project_id)
@@ -141,8 +151,17 @@ class ProofreadingService:
             analysis = result.scalar_one_or_none()
             # Extract style info from raw_analysis (dynamic JSON structure)
             raw = analysis.raw_analysis if analysis and analysis.raw_analysis else {}
-            writing_style = raw.get("writing_style") or raw.get("style_and_register", {}).get("register") or "Unknown"
-            tone = raw.get("tone") or raw.get("style_and_register", {}).get("overall_tone") or "Unknown"
+            writing_style = raw.get("writing_style") or raw.get("style_and_register", {}).get("register") or ""
+            tone = raw.get("tone") or raw.get("style_and_register", {}).get("overall_tone") or ""
+
+            # Extract terminology table
+            key_terminology = raw.get("key_terminology", [])
+            terminology_text = ""
+            if key_terminology:
+                terminology_text = "\n".join(
+                    f"- {term.get('english_term', '')}: {term.get('chinese_translation', '')}"
+                    for term in key_terminology
+                )
 
             # Get paragraphs to proofread (with translations)
             query = (
@@ -160,10 +179,23 @@ class ProofreadingService:
             # Build LiteLLM model string
             litellm_model = self._get_litellm_model(provider, model)
 
+            # Track processing results
+            success_count = 0
+            failed_paragraphs = []
+            skipped_no_translation = 0
+
             # Process each paragraph
             for para in paragraphs:
+                # Check if session has been cancelled
+                await db.refresh(session)
+                if session.status == ProofreadingStatus.CANCELLED.value:
+                    session.completed_at = datetime.utcnow()
+                    await db.commit()
+                    return
+
                 # Get the latest translation
                 if not para.translations:
+                    skipped_no_translation += 1
                     continue
 
                 latest_translation = max(
@@ -172,23 +204,37 @@ class ProofreadingService:
                 )
 
                 if not latest_translation.translated_text:
+                    skipped_no_translation += 1
                     continue
 
                 # Build prompts using PromptLoader
                 template = PromptLoader.load_template("proofreading")
+                # Use flat dictionary structure with namespaced keys
                 variables = {
-                    "content": {
-                        "source": para.original_text,
-                        "target": latest_translation.translated_text,
-                    },
-                    "derived": {
-                        "writing_style": writing_style,
-                        "tone": tone,
-                    },
+                    # Content (required)
+                    "content.source": para.original_text,
+                    "content.target": latest_translation.translated_text,
+                    # Project info
+                    "project.title": project.epub_title or project.name if project else "",
+                    "project.author": project.epub_author if project else "",
+                    "project.author_background": project.author_background if project else "",
+                    # Derived from analysis
+                    "derived.writing_style": writing_style,
+                    "derived.tone": tone,
+                    "derived.terminology_table": terminology_text,
+                    "derived.author_name": raw.get("author_name", ""),
+                    "derived.author_biography": raw.get("author_biography", ""),
+                    # Boolean flags for conditional rendering
+                    "derived.has_analysis": analysis is not None,
+                    "derived.has_writing_style": bool(writing_style),
+                    "derived.has_tone": bool(tone),
+                    "derived.has_terminology": bool(terminology_text),
                 }
 
-                system_prompt = custom_system_prompt or PromptLoader.render(
-                    template.system_prompt, variables
+                # Render both system and user prompts with variables
+                # If custom prompts provided, they contain template markers that need substitution
+                system_prompt = PromptLoader.render(
+                    custom_system_prompt or template.system_prompt, variables
                 )
                 user_prompt = PromptLoader.render(
                     custom_user_prompt or template.user_prompt_template,
@@ -204,45 +250,101 @@ class ProofreadingService:
                             {"role": "user", "content": user_prompt},
                         ],
                         api_key=api_key,
+                        response_format={"type": "json_object"},
                     )
 
                     content = response.choices[0].message.content
-                    result_data = self._parse_json_response(content)
-
-                    # Only create suggestion if improvement is needed
-                    # Support both old format (needs_improvement) and new format (improvement_level)
-                    improvement_level = result_data.get("improvement_level", "none")
-                    needs_improvement = result_data.get("needs_improvement", False)
-
-                    # Determine if we should create a suggestion
-                    should_create = needs_improvement or improvement_level in [
-                        ImprovementLevel.OPTIONAL.value,
-                        ImprovementLevel.RECOMMENDED.value,
-                        ImprovementLevel.CRITICAL.value,
-                    ]
-
-                    if should_create:
-                        suggestion = ProofreadingSuggestion(
-                            id=str(uuid.uuid4()),
-                            session_id=session_id,
-                            paragraph_id=para.id,
-                            original_translation=latest_translation.translated_text,
-                            suggested_translation=result_data.get("suggested_translation", ""),
-                            explanation=result_data.get("explanation", ""),
-                            improvement_level=improvement_level,
-                            issue_types=result_data.get("issue_types", []),
-                            status=SuggestionStatus.PENDING.value,
+                    logger.info(f"Proofreading paragraph {para.id} raw response: {content}")
+                    try:
+                        result_data = self._parse_json_response(content)
+                    except ValueError as parse_error:
+                        # Fail fast on invalid JSON to avoid silent "no-op" suggestions
+                        session.status = ProofreadingStatus.FAILED.value
+                        session.error_message = (
+                            f"Invalid LLM response for paragraph {para.id}: {parse_error}"
                         )
-                        db.add(suggestion)
+                        await db.commit()
+                        logger.error(
+                            "Proofreading JSON parse failed for paragraph %s: %s. Raw response: %s",
+                            para.id,
+                            parse_error,
+                            content,
+                        )
+                        raise
+
+                    # Create suggestion for all responses (including "none" level)
+                    # This allows users to see LLM feedback even when no changes are needed
+                    improvement_level = result_data.get("improvement_level", "none")
+
+                    # suggested_translation is now optional (comment-only workflow)
+                    # Only use it if provided by the LLM
+                    suggested_translation = result_data.get("suggested_translation")
+
+                    suggestion = ProofreadingSuggestion(
+                        id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        paragraph_id=para.id,
+                        original_translation=latest_translation.translated_text,
+                        suggested_translation=suggested_translation,
+                        explanation=result_data.get("explanation", ""),
+                        improvement_level=improvement_level,
+                        issue_types=result_data.get("issue_types", []),
+                        status=SuggestionStatus.PENDING.value,
+                    )
+                    db.add(suggestion)
+                    success_count += 1
 
                 except Exception as e:
-                    # Log error but continue with other paragraphs
-                    print(f"Error proofreading paragraph {para.id}: {e}")
+                    # Log error with proper logging and track failed paragraph
+                    error_msg = f"Error proofreading paragraph {para.id}: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    failed_paragraphs.append({
+                        "paragraph_id": para.id,
+                        "error": str(e)
+                    })
 
                 # Update progress
                 session.completed_paragraphs += 1
                 session.update_progress()
                 await db.commit()
+
+            # Check if all paragraphs failed
+            processed_count = success_count + len(failed_paragraphs)
+            if processed_count > 0 and success_count == 0:
+                # All paragraphs failed - mark session as failed
+                session.status = ProofreadingStatus.FAILED.value
+                error_summary = f"All {len(failed_paragraphs)} paragraphs failed. "
+                if failed_paragraphs:
+                    # Show first few errors
+                    sample_errors = failed_paragraphs[:3]
+                    error_details = "; ".join([f"{e['paragraph_id']}: {e['error']}" for e in sample_errors])
+                    error_summary += f"Sample errors: {error_details}"
+                session.error_message = error_summary
+                await db.commit()
+                logger.error(
+                    "Proofreading session %s failed: all %d paragraphs failed",
+                    session_id,
+                    len(failed_paragraphs),
+                )
+                return
+            elif len(failed_paragraphs) > 0:
+                # Some paragraphs failed - log warning but continue
+                logger.warning(
+                    "Proofreading session %s completed with %d successes, %d failures, %d skipped",
+                    session_id,
+                    success_count,
+                    len(failed_paragraphs),
+                    skipped_no_translation,
+                )
+
+            # Log summary
+            logger.info(
+                "Proofreading session %s completed: %d successes, %d failures, %d skipped (no translation)",
+                session_id,
+                success_count,
+                len(failed_paragraphs),
+                skipped_no_translation,
+            )
 
             # Mark as completed
             session.status = ProofreadingStatus.COMPLETED.value
@@ -273,7 +375,12 @@ class ProofreadingService:
         return f"{prefix}{model}"
 
     def _parse_json_response(self, content: str) -> dict:
-        """Parse JSON response from LLM."""
+        """Parse JSON response from LLM.
+
+        Raises ValueError on failure instead of silently falling back, so we
+        surface bad model outputs and stop the session.
+        """
+        raw_content = content
         try:
             # Try to extract JSON from markdown code block
             if "```json" in content:
@@ -286,8 +393,8 @@ class ProofreadingService:
                 content = content[start:end].strip()
 
             return json.loads(content)
-        except json.JSONDecodeError:
-            return {"needs_improvement": False}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Failed to parse JSON response: {exc}") from exc
 
     async def get_session(
         self,
@@ -340,7 +447,10 @@ class ProofreadingService:
         """
         query = (
             select(ProofreadingSuggestion)
-            .options(selectinload(ProofreadingSuggestion.paragraph))
+            .options(
+                selectinload(ProofreadingSuggestion.paragraph)
+                .selectinload(Paragraph.translations)
+            )
             .where(ProofreadingSuggestion.session_id == session_id)
         )
 
@@ -352,12 +462,22 @@ class ProofreadingService:
         result = await db.execute(query)
         suggestions = result.scalars().all()
 
-        return [
-            {
+        suggestion_list = []
+        for s in suggestions:
+            # Get current translation info from latest version
+            is_confirmed = False
+            current_translation = s.original_translation  # Default to snapshot
+            if s.paragraph and s.paragraph.translations:
+                latest_translation = max(s.paragraph.translations, key=lambda t: t.version)
+                is_confirmed = latest_translation.is_confirmed
+                current_translation = latest_translation.translated_text or s.original_translation
+
+            suggestion_list.append({
                 "id": s.id,
                 "paragraph_id": s.paragraph_id,
                 "original_text": s.paragraph.original_text if s.paragraph else None,
-                "original_translation": s.original_translation,
+                "original_translation": s.original_translation,  # Snapshot when suggestion was created
+                "current_translation": current_translation,  # Actual current translation (may be edited)
                 "suggested_translation": s.suggested_translation,
                 "explanation": s.explanation,
                 "improvement_level": s.improvement_level,
@@ -365,9 +485,10 @@ class ProofreadingService:
                 "status": s.status,
                 "user_modified_text": s.user_modified_text,
                 "created_at": s.created_at.isoformat(),
-            }
-            for s in suggestions
-        ]
+                "is_confirmed": is_confirmed,
+            })
+
+        return suggestion_list
 
     async def update_suggestion(
         self,
@@ -437,6 +558,17 @@ class ProofreadingService:
 
         applied_count = 0
         for suggestion in suggestions:
+            # Skip suggestions without a replacement text (comment-only mode)
+            new_text = None
+            if suggestion.status == SuggestionStatus.MODIFIED.value:
+                new_text = suggestion.user_modified_text
+            else:
+                new_text = suggestion.suggested_translation
+
+            if not new_text:
+                # Skip comment-only suggestions
+                continue
+
             # Get the latest translation for the paragraph
             result = await db.execute(
                 select(Translation)
@@ -448,11 +580,7 @@ class ProofreadingService:
 
             if translation:
                 # Apply the suggested or modified text
-                if suggestion.status == SuggestionStatus.MODIFIED.value:
-                    translation.translated_text = suggestion.user_modified_text
-                else:
-                    translation.translated_text = suggestion.suggested_translation
-
+                translation.translated_text = new_text
                 translation.is_manual_edit = True
                 applied_count += 1
 
@@ -476,6 +604,27 @@ class ProofreadingService:
             .where(ProofreadingSuggestion.status == SuggestionStatus.PENDING.value)
         )
         return result.scalar() or 0
+
+    async def cancel_session(
+        self,
+        db: AsyncSession,
+        session_id: str,
+    ) -> ProofreadingSession:
+        """Cancel a running proofreading session."""
+        result = await db.execute(
+            select(ProofreadingSession).where(ProofreadingSession.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if not session:
+            raise ValueError(f"Session {session_id} not found")
+
+        if session.status == ProofreadingStatus.PROCESSING.value:
+            session.status = ProofreadingStatus.CANCELLED.value
+            session.completed_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(session)
+
+        return session
 
 
 # Global service instance

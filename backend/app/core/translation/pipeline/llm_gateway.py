@@ -1,15 +1,16 @@
 """LLM Gateway for unified provider access.
 
 This module provides an abstract gateway interface for LLM providers,
-along with concrete implementations for OpenAI, Anthropic, and others.
+along with unified implementation using LiteLLM content.
 """
 
 import time
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Type
 
 from ..models.prompt import PromptBundle
 from ..models.response import LLMResponse, TokenUsage
+from litellm import acompletion
 
 
 class LLMGateway(ABC):
@@ -65,17 +66,17 @@ class LLMGateway(ABC):
         pass
 
 
-class OpenAIGateway(LLMGateway):
-    """Gateway for OpenAI and OpenAI-compatible APIs using LiteLLM."""
+class LiteLLMGateway(LLMGateway):
+    """Unified Gateway for all providers using LiteLLM."""
 
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
+        model: str,
         base_url: Optional[str] = None,
         provider_name: str = "openai",
     ):
-        """Initialize OpenAI gateway.
+        """Initialize LiteLLM gateway.
 
         Args:
             api_key: API key for authentication
@@ -97,6 +98,13 @@ class OpenAIGateway(LLMGateway):
             self._litellm_model = f"openai/{model}"  # Qwen uses OpenAI-compatible API
         elif provider_name == "gemini":
             self._litellm_model = f"gemini/{model}"
+        elif provider_name == "anthropic":
+            # LiteLLM expects "anthropic/claude-..." or just "claude-..."
+            # Safest is to explicitly add prefix if not present
+            if not model.startswith("anthropic/") and not model.startswith("claude"):
+                 self._litellm_model = f"anthropic/{model}"
+            else:
+                 self._litellm_model = model
         else:
             self._litellm_model = model
 
@@ -122,8 +130,6 @@ class OpenAIGateway(LLMGateway):
         Returns:
             LLMResponse with translated content
         """
-        from litellm import acompletion
-
         start_time = time.time()
 
         kwargs = {
@@ -136,7 +142,8 @@ class OpenAIGateway(LLMGateway):
 
         if self._base_url:
             kwargs["api_base"] = self._base_url
-
+        
+        # Add response format if specified
         if bundle.response_format:
             kwargs["response_format"] = bundle.response_format
 
@@ -171,8 +178,6 @@ class OpenAIGateway(LLMGateway):
         Yields:
             LLMResponse chunks
         """
-        from litellm import acompletion
-
         start_time = time.time()
         accumulated_content = ""
         chunk_index = 0
@@ -218,8 +223,6 @@ class OpenAIGateway(LLMGateway):
 
     async def health_check(self) -> bool:
         """Check LLM API availability."""
-        from litellm import acompletion
-
         try:
             await acompletion(
                 model=self._litellm_model,
@@ -232,146 +235,39 @@ class OpenAIGateway(LLMGateway):
             return False
 
 
-class AnthropicGateway(LLMGateway):
-    """Gateway for Anthropic Claude API."""
-
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
-        """Initialize Anthropic gateway.
-
-        Args:
-            api_key: API key for authentication
-            model: Model identifier
-        """
-        from anthropic import AsyncAnthropic
-
-        self.client = AsyncAnthropic(api_key=api_key)
-        self._model = model
-        self._provider = "anthropic"
-
-    @property
-    def provider(self) -> str:
-        return self._provider
-
-    @property
-    def model(self) -> str:
-        return self._model
-
-    async def call(self, bundle: PromptBundle) -> LLMResponse:
-        """Make Anthropic API call.
-
-        Args:
-            bundle: Prompt bundle
-
-        Returns:
-            LLMResponse with translated content
-        """
-        start_time = time.time()
-        system, messages = bundle.to_anthropic_format()
-
-        response = await self.client.messages.create(
-            model=self._model,
-            system=system,
-            messages=messages,
-            max_tokens=bundle.max_tokens,
-            temperature=bundle.temperature,
-        )
-
-        latency_ms = int((time.time() - start_time) * 1000)
-
-        content = ""
-        if response.content and len(response.content) > 0:
-            content = response.content[0].text
-
-        return LLMResponse(
-            content=content,
-            provider=self._provider,
-            model=self._model,
-            usage=TokenUsage(
-                prompt_tokens=response.usage.input_tokens if response.usage else 0,
-                completion_tokens=response.usage.output_tokens if response.usage else 0,
-            ),
-            latency_ms=latency_ms,
-        )
-
-    async def stream(self, bundle: PromptBundle) -> AsyncIterator[LLMResponse]:
-        """Stream Anthropic API response.
-
-        Args:
-            bundle: Prompt bundle
-
-        Yields:
-            LLMResponse chunks
-        """
-        start_time = time.time()
-        accumulated_content = ""
-        chunk_index = 0
-
-        system, messages = bundle.to_anthropic_format()
-
-        async with self.client.messages.stream(
-            model=self._model,
-            system=system,
-            messages=messages,
-            max_tokens=bundle.max_tokens,
-            temperature=bundle.temperature,
-        ) as stream:
-            async for text in stream.text_stream:
-                accumulated_content += text
-
-                yield LLMResponse(
-                    content=text,
-                    provider=self._provider,
-                    model=self._model,
-                    latency_ms=int((time.time() - start_time) * 1000),
-                    is_complete=False,
-                    chunk_index=chunk_index,
-                )
-                chunk_index += 1
-
-        # Final chunk
-        yield LLMResponse(
-            content=accumulated_content,
-            provider=self._provider,
-            model=self._model,
-            latency_ms=int((time.time() - start_time) * 1000),
-            is_complete=True,
-            chunk_index=chunk_index,
-        )
-
-    async def health_check(self) -> bool:
-        """Check Anthropic API availability."""
-        try:
-            # Anthropic doesn't have a simple health check endpoint
-            # We could make a minimal API call, but for now just return True
-            return True
-        except Exception:
-            return False
-
-
 class GatewayFactory:
     """Factory for creating LLM gateways."""
 
     # Provider configurations
     PROVIDER_CONFIGS = {
         "openai": {
-            "class": OpenAIGateway,
+            "class": LiteLLMGateway,
             "base_url": None,
         },
         "anthropic": {
-            "class": AnthropicGateway,
+            "class": LiteLLMGateway,
             "base_url": None,
         },
         "deepseek": {
-            "class": OpenAIGateway,
+            "class": LiteLLMGateway,
             "base_url": "https://api.deepseek.com/v1",
         },
         "qwen": {
-            "class": OpenAIGateway,
+            "class": LiteLLMGateway,
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         },
         "gemini": {
-            "class": OpenAIGateway,
+            "class": LiteLLMGateway,
             "base_url": None,  # Let LiteLLM use default Gemini endpoint
+        },
+        # Add support for other providers routed to LiteLLM
+        "ollama": {
+            "class": LiteLLMGateway,
+            "base_url": None,
+        },
+        "openrouter": {
+            "class": LiteLLMGateway,
+            "base_url": None,
         },
     }
 
@@ -400,27 +296,28 @@ class GatewayFactory:
         provider = provider.lower()
         config = cls.PROVIDER_CONFIGS.get(provider)
 
+        # Fallback to generic LiteLLM if provider known
         if not config:
-            raise ValueError(
-                f"Unknown provider: {provider}. "
-                f"Supported: {list(cls.PROVIDER_CONFIGS.keys())}"
-            )
+            # Check if it's a known provider in our config even if not explicitly in PROVIDER_CONFIGS
+            # If valid provider, default to LiteLLMGateway
+            config = {
+                "class": LiteLLMGateway,
+                "base_url": None,
+            }
 
         gateway_class = config["class"]
         base_url = config.get("base_url")
 
-        if gateway_class == OpenAIGateway:
-            return OpenAIGateway(
+        # Allow base_url override from kwargs
+        if "base_url" in kwargs:
+            base_url = kwargs.pop("base_url")
+
+        if gateway_class == LiteLLMGateway:
+            return LiteLLMGateway(
                 api_key=api_key,
                 model=model,
                 base_url=base_url,
                 provider_name=provider,
-                **kwargs,
-            )
-        elif gateway_class == AnthropicGateway:
-            return AnthropicGateway(
-                api_key=api_key,
-                model=model,
                 **kwargs,
             )
         else:

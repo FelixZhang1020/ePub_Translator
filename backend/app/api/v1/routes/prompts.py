@@ -12,10 +12,18 @@ from app.core.prompts.loader import (
     PromptLoader,
     PromptTemplate as FilePromptTemplate,
 )
+from app.core.prompts.variables import VariableService, StageType
+from app.core.prompts.output_schemas import (
+    ANALYSIS_OUTPUT_SCHEMA,
+    PROOFREADING_OUTPUT_SCHEMA,
+    DERIVED_MAPPING_DISPLAY,
+)
 from app.models.database import (
     get_db,
     ProjectPromptConfig,
     PromptCategory,
+    Project,
+    BookAnalysis,
 )
 
 router = APIRouter()
@@ -125,6 +133,68 @@ class ProjectVariablesResponse(BaseModel):
     """Response model for project variables (file-based)."""
     project_id: str
     variables: dict[str, Any]  # All variables from variables.json
+
+
+# ============================================================================
+# Parameter Review Models
+# ============================================================================
+
+class ParameterInfo(BaseModel):
+    """Information about a single input parameter."""
+    name: str                    # e.g., "project.title"
+    namespace: str               # e.g., "project"
+    short_name: str              # e.g., "title"
+    value: Any                   # Current value
+    value_preview: str           # Truncated preview (max 100 chars)
+    is_effective: bool           # True if non-empty
+    value_type: str              # "string", "list", "object", "boolean"
+    description: Optional[str] = None
+    stages: List[str]            # Which stages this is available in
+
+
+class OutputFieldInfo(BaseModel):
+    """Information about a single output field from LLM."""
+    name: str                    # e.g., "writing_style"
+    description: str             # What this field contains
+    value_type: str              # "string", "list", "object", "boolean"
+    current_value: Optional[Any] = None  # Actual value if populated
+    is_populated: bool           # Whether this field has a value
+
+
+class DerivedMapping(BaseModel):
+    """Mapping from analysis output to derived variable."""
+    source: str        # Source field in raw analysis
+    target: str        # Target derived variable
+    transform: str     # Transform function name (empty if none)
+    used_in: List[str] # Which stages use this variable
+
+
+class StageParameterReview(BaseModel):
+    """Parameter review for a single stage."""
+    stage: str                   # "analysis", "translation", etc.
+    template_name: str           # Current template being used
+
+    # Input parameters (what goes INTO the LLM call)
+    input_parameters: List[ParameterInfo]
+    input_effective_count: int
+    input_total_count: int
+
+    # Output parameters (what the LLM produces - for stages with structured output)
+    output_fields: Optional[List[OutputFieldInfo]] = None  # None for plain-text stages
+    output_populated_count: Optional[int] = None
+    has_structured_output: bool  # True for analysis/proofreading
+
+    # For analysis stage: show mapping to derived variables
+    derived_mappings: Optional[List[DerivedMapping]] = None
+
+
+class ParameterReviewResponse(BaseModel):
+    """Complete parameter review across all stages."""
+    project_id: str
+    project_name: str
+    analysis_completed: bool     # Whether analysis has run
+    stages: List[StageParameterReview]
+    summary: dict[str, int]      # overall stats
 
 
 # ============================================================================
@@ -719,6 +789,202 @@ async def get_available_variables(
         stage_type = stage  # type: ignore
 
     return await VariableService.get_available_variables(db, project_id, stage_type)
+
+
+@router.get("/prompts/projects/{project_id}/parameter-review")
+async def get_parameter_review(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ParameterReviewResponse:
+    """Get comprehensive parameter review for all workflow stages.
+
+    Returns:
+        - Input parameters for each stage with effectiveness status
+        - Output parameters for structured stages (analysis/proofreading)
+        - Derived variable mappings showing how analysis output flows to other stages
+    """
+    # Load project
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Load analysis
+    result = await db.execute(
+        select(BookAnalysis).where(BookAnalysis.project_id == project_id)
+    )
+    analysis = result.scalar_one_or_none()
+    analysis_completed = analysis is not None and analysis.raw_analysis is not None
+
+    # Get project config to determine template names
+    config = PromptLoader.load_project_config(project_id)
+
+    # Build stage reviews
+    stages: List[StageParameterReview] = []
+
+    # Process each stage
+    for stage_name in ["analysis", "translation", "optimization", "proofreading"]:
+        stage_type: StageType = stage_name  # type: ignore
+
+        # Get template name for this stage
+        template_name = "default"
+        if config and "prompts" in config:
+            prompt_config = config["prompts"].get(stage_name, {})
+            template_name = prompt_config.get("system_template", "default")
+
+        # Get input parameters
+        input_params: List[ParameterInfo] = []
+        available_vars = await VariableService.get_available_variables(
+            db, project_id, stage_type
+        )
+
+        # Convert available variables to ParameterInfo
+        for namespace, vars_list in available_vars.items():
+            if namespace == "macros":
+                continue  # Skip macros for now
+
+            for var_info in vars_list:
+                value = var_info.get("current_value")
+                is_effective = VariableService.is_value_effective(value)
+
+                # Create value preview (truncate if too long)
+                if value is None:
+                    value_preview = "(empty)"
+                elif isinstance(value, str):
+                    value_preview = value[:100] + "..." if len(value) > 100 else value
+                elif isinstance(value, (list, dict)):
+                    value_str = str(value)
+                    value_preview = value_str[:100] + "..." if len(value_str) > 100 else value_str
+                else:
+                    value_preview = str(value)
+
+                # Determine value type
+                value_type = var_info.get("type", "string")
+                if value_type is None:
+                    if isinstance(value, bool):
+                        value_type = "boolean"
+                    elif isinstance(value, (int, float)):
+                        value_type = "number"
+                    elif isinstance(value, list):
+                        value_type = "list"
+                    elif isinstance(value, dict):
+                        value_type = "object"
+                    else:
+                        value_type = "string"
+
+                # Extract short name from full name
+                full_name = var_info.get("name", "")
+                short_name = full_name.split(".")[-1] if "." in full_name else full_name
+
+                input_params.append(ParameterInfo(
+                    name=full_name,
+                    namespace=namespace,
+                    short_name=short_name,
+                    value=value,
+                    value_preview=value_preview,
+                    is_effective=is_effective,
+                    value_type=value_type,
+                    description=var_info.get("description"),
+                    stages=var_info.get("stages", [stage_name]),
+                ))
+
+        # Count effective input parameters
+        input_effective_count = sum(1 for p in input_params if p.is_effective)
+        input_total_count = len(input_params)
+
+        # Get output fields for stages with structured output
+        output_fields: Optional[List[OutputFieldInfo]] = None
+        output_populated_count: Optional[int] = None
+        has_structured_output = False
+        derived_mappings: Optional[List[DerivedMapping]] = None
+
+        if stage_name == "analysis":
+            has_structured_output = True
+            # Get schema for this template
+            schema = ANALYSIS_OUTPUT_SCHEMA.get(template_name, ANALYSIS_OUTPUT_SCHEMA["default"])
+
+            output_fields = []
+            for field_schema in schema:
+                field_name = field_schema["name"]
+                # Get current value from analysis.raw_analysis
+                current_value = None
+                is_populated = False
+                if analysis and analysis.raw_analysis:
+                    # Navigate nested dict for field names like "translation_principles.priority_order"
+                    parts = field_name.split(".")
+                    value = analysis.raw_analysis
+                    for part in parts:
+                        if isinstance(value, dict) and part in value:
+                            value = value[part]
+                        else:
+                            value = None
+                            break
+                    current_value = value
+                    is_populated = VariableService.is_value_effective(value)
+
+                output_fields.append(OutputFieldInfo(
+                    name=field_name,
+                    description=field_schema["description"],
+                    value_type=field_schema["type"],
+                    current_value=current_value,
+                    is_populated=is_populated,
+                ))
+
+            output_populated_count = sum(1 for f in output_fields if f.is_populated)
+
+            # Add derived mappings
+            derived_mappings = [
+                DerivedMapping(
+                    source=m["source"],
+                    target=m["target"],
+                    transform=m["transform"],
+                    used_in=m["used_in"],
+                )
+                for m in DERIVED_MAPPING_DISPLAY
+            ]
+
+        elif stage_name == "proofreading":
+            has_structured_output = True
+            output_fields = []
+            for field_schema in PROOFREADING_OUTPUT_SCHEMA:
+                # For proofreading, we don't show current values since they're per-paragraph
+                output_fields.append(OutputFieldInfo(
+                    name=field_schema["name"],
+                    description=field_schema["description"],
+                    value_type=field_schema["type"],
+                    current_value=None,
+                    is_populated=False,
+                ))
+            output_populated_count = 0
+
+        stages.append(StageParameterReview(
+            stage=stage_name,
+            template_name=template_name,
+            input_parameters=input_params,
+            input_effective_count=input_effective_count,
+            input_total_count=input_total_count,
+            output_fields=output_fields,
+            output_populated_count=output_populated_count,
+            has_structured_output=has_structured_output,
+            derived_mappings=derived_mappings,
+        ))
+
+    # Calculate summary stats
+    total_input_effective = sum(s.input_effective_count for s in stages)
+    total_input_count = sum(s.input_total_count for s in stages)
+
+    return ParameterReviewResponse(
+        project_id=project_id,
+        project_name=project.name,
+        analysis_completed=analysis_completed,
+        stages=stages,
+        summary={
+            "total_input_effective": total_input_effective,
+            "total_input_count": total_input_count,
+        },
+    )
 
 
 @router.get("/prompts/projects/{project_id}/{category}")

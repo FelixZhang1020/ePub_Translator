@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Settings } from 'lucide-react'
 import { api } from '../../services/api/client'
 import { useTranslation, useAppStore } from '../../stores/appStore'
+
+// Map database step name to URL path
+const getRoutePathFromStep = (step: string): string => {
+  const stepToRoute: Record<string, string> = {
+    'analysis': 'analysis',
+    'translation': 'translate',
+    'proofreading': 'proofread',
+    'export': 'export'
+  }
+  return stepToRoute[step] || 'analysis'
+}
 
 export function ProjectLayout() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -12,8 +23,9 @@ export function ProjectLayout() {
   const { t } = useTranslation()
   const setTranslationProgress = useAppStore((state) => state.setTranslationProgress)
   const setWorkflowStatus = useAppStore((state) => state.setWorkflowStatus)
+  const setIsAnalyzing = useAppStore((state) => state.setIsAnalyzing)
 
-  // Get current step from URL path
+  // Map URL path to database step name
   const getCurrentStepFromPath = (): string => {
     const path = location.pathname
     if (path.includes('/analysis')) return 'analysis'
@@ -62,6 +74,43 @@ export function ProjectLayout() {
     setCurrentStep(getCurrentStepFromPath())
   }, [location.pathname])
 
+  // Validate stage access and redirect if necessary
+  useEffect(() => {
+    if (!workflowStatus || !projectId) return
+
+    const currentPath = getCurrentStepFromPath()
+
+    // Define stage access rules
+    const canAccessStage = (stage: string): boolean => {
+      if (stage === 'analysis') return true
+      if (stage === 'translation') return workflowStatus.analysis_completed ?? false
+      if (stage === 'proofreading') return workflowStatus.translation_completed ?? false
+      if (stage === 'export') return workflowStatus.proofreading_completed ?? false
+      return false
+    }
+
+    // Redirect if trying to access a locked stage
+    if (!canAccessStage(currentPath)) {
+      // Find the furthest accessible stage
+      const stages = ['analysis', 'translation', 'proofreading', 'export']
+      let redirectStage = 'analysis'
+
+      for (const stage of stages) {
+        if (canAccessStage(stage)) {
+          redirectStage = stage
+        } else {
+          break
+        }
+      }
+
+      // Only redirect if we're not already on the correct stage
+      if (currentPath !== redirectStage) {
+        const routePath = getRoutePathFromStep(redirectStage)
+        navigate(`/project/${projectId}/${routePath}`, { replace: true })
+      }
+    }
+  }, [location.pathname, workflowStatus, projectId, navigate])
+
   // Sync translation progress to global store for header display
   useEffect(() => {
     if (effectiveIsTranslating && effectiveTranslationProgress && project && projectId) {
@@ -78,16 +127,30 @@ export function ProjectLayout() {
     }
   }, [effectiveIsTranslating, effectiveTranslationProgress, project, projectId, setTranslationProgress])
 
+  // Check if analysis is in progress
+  const analysisProgress = effectiveWorkflowStatus?.analysis_progress
+  const isAnalyzing = !!(analysisProgress?.has_task && analysisProgress?.status === 'processing')
+
   // Sync workflow status to global store for header display
   useEffect(() => {
     if (projectId && effectiveWorkflowStatus) {
+      const analysisProgress = effectiveWorkflowStatus.analysis_progress
       const translationProgress = effectiveWorkflowStatus.translation_progress
+      const proofreadingProgress = effectiveWorkflowStatus.proofreading_progress
+
+      // Sync analysis running state to global store
+      setIsAnalyzing(isAnalyzing)
+
       setWorkflowStatus({
         projectId,
         currentStep: currentStep as 'analysis' | 'translation' | 'proofreading' | 'export',
         analysisCompleted: effectiveWorkflowStatus.analysis_completed ?? false,
         translationCompleted: effectiveWorkflowStatus.translation_completed ?? false,
         proofreadingCompleted: effectiveWorkflowStatus.proofreading_completed ?? false,
+        analysisProgress: analysisProgress ? {
+          exists: analysisProgress.exists ?? false,
+          confirmed: analysisProgress.confirmed ?? false,
+        } : undefined,
         translationProgress: translationProgress ? {
           hasTask: translationProgress.has_task ?? false,
           status: translationProgress.status,
@@ -95,9 +158,16 @@ export function ProjectLayout() {
           completedParagraphs: translationProgress.completed_paragraphs ?? 0,
           totalParagraphs: translationProgress.total_paragraphs ?? 0,
         } : undefined,
+        proofreadingProgress: proofreadingProgress ? {
+          hasSession: proofreadingProgress.has_session ?? false,
+          status: proofreadingProgress.status,
+          roundNumber: proofreadingProgress.round_number,
+          progress: proofreadingProgress.progress ?? 0,
+          pendingSuggestions: proofreadingProgress.pending_suggestions ?? 0,
+        } : undefined,
       })
     }
-  }, [projectId, currentStep, effectiveWorkflowStatus, setWorkflowStatus])
+  }, [projectId, currentStep, effectiveWorkflowStatus, isAnalyzing, setWorkflowStatus, setIsAnalyzing])
 
   // Clear progress and workflow status when leaving the project
   useEffect(() => {
@@ -171,6 +241,13 @@ export function ProjectLayout() {
                 </p>
               )}
             </div>
+            <button
+              onClick={() => navigate(`/project/${projectId}/parameters`)}
+              className="ml-3 p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+              title={t('parameterReview.title')}
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>

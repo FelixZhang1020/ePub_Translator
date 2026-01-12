@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.database.chapter import Chapter
     from app.models.database.translation import TranslationTask
     from app.models.database.book_analysis import BookAnalysis
+    from app.models.database.analysis_task import AnalysisTask
     from app.models.database.reference_epub import ReferenceEPUB
     from app.models.database.paragraph_match import ParagraphMatch
     from app.models.database.proofreading import ProofreadingSession
@@ -76,6 +77,9 @@ class Project(Base):
     analysis: Mapped[Optional["BookAnalysis"]] = relationship(
         "BookAnalysis", back_populates="project", uselist=False,
         cascade="all, delete-orphan"
+    )
+    analysis_tasks: Mapped[list["AnalysisTask"]] = relationship(
+        "AnalysisTask", back_populates="project", cascade="all, delete-orphan"
     )
     reference_epub: Mapped[Optional["ReferenceEPUB"]] = relationship(
         "ReferenceEPUB", back_populates="project", uselist=False,

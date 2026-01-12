@@ -18,7 +18,12 @@
     "show": "显示",
     "hide": "隐藏",
     "progress": "进度",
-    "items": "项"
+    "items": "项",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "continue": "继续",
+    "apply": "应用",
+    "dismiss": "忽略"
   },
   "app": {
     "title": "EPUB 翻译工具"
@@ -164,6 +169,7 @@
     "statusPaused": "已暂停",
     "statusFailed": "失败",
     "statusPending": "等待中",
+    "noChapterSelected": "未选择章节",
     "exportEpub": "导出 EPUB",
     "referenceLoaded": "已加载参考译本",
     "uploadReference": "上传中文参考译本",
@@ -213,10 +219,15 @@
     "continueTranslating": "继续翻译",
     "resetTranslationStatus": "重置状态以继续翻译",
     "cancelStuckTasks": "取消卡住的任务",
-    "cancelingTasks": "取消中..."
+    "cancelingTasks": "取消中...",
+    "unlockToEdit": "解锁后才能编辑或重新翻译",
+    "locked": "已锁定",
+    "unlocked": "未锁定"
   },
   "preview": {
     "chapterList": "章节列表",
+    "expandAll": "展开全部",
+    "collapseAll": "收起全部",
     "chapterNumber": "第 {{number}} 章",
     "prevChapter": "上一章",
     "nextChapter": "下一章",
@@ -231,7 +242,7 @@
     "imageLoadError": "图片加载失败"
   },
   "workflow": {
-    "analysis": "书籍分析",
+    "analysis": "分析",
     "translation": "翻译",
     "translating": "翻译中",
     "proofreading": "校对",
@@ -279,6 +290,7 @@
     "title": "校对审核",
     "round": "轮次",
     "start": "开始校对",
+    "startFailed": "启动校对失败",
     "newRound": "新一轮校对",
     "noSession": "暂无校对记录",
     "noSessionHint": "开始校对流程以审核和改进翻译质量。",
@@ -292,10 +304,14 @@
     "applyChanges": "应用修改",
     "noPending": "暂无待处理建议",
     "noSuggestions": "未找到建议",
+    "noSuggestionsGenerated": "未生成任何建议",
+    "noSuggestionsHint": "校对流程已完成，但未生成任何建议。这可能是因为所有翻译都被跳过，或者在处理过程中发生了错误。",
     "originalText": "原文",
     "currentTranslation": "当前翻译",
     "suggestedTranslation": "建议翻译",
     "explanation": "修改理由",
+    "feedback": "反馈意见",
+    "acknowledge": "已知悉",
     "accept": "接受",
     "reject": "拒绝",
     "modified": "已修改",
@@ -312,7 +328,26 @@
     "shortcutAccept": "接受",
     "shortcutReject": "拒绝",
     "shortcutEdit": "编辑",
-    "shortcutNav": "导航"
+    "shortcutNav": "导航",
+    "backToTranslation": "返回翻译",
+    "selectChapters": "选择章节",
+    "selectChaptersHint": "选择要校对的章节（不选择则校对全部）",
+    "allChaptersSelected": "将校对所有章节",
+    "chaptersSelected": "已选择 {{count}} 个章节",
+    "cancel": "取消",
+    "loadingSuggestions": "正在加载建议...",
+    "sessionDetails": "会话详情",
+    "totalParagraphs": "总段落数",
+    "completedParagraphs": "已完成段落数",
+    "confirm": "锁定翻译",
+    "unlock": "解锁翻译",
+    "translationLocked": "翻译已锁定",
+    "translationUnlocked": "翻译已解锁",
+    "lockToAccept": "点击锁定图标标记为已接受",
+    "askLLM": "推荐",
+    "getRecommendation": "获取 LLM 推荐",
+    "recommendedTranslation": "推荐翻译",
+    "applyRecommendation": "应用此推荐"
   },
   "export": {
     "title": "导出",
@@ -455,5 +490,43 @@
     "addFirstVariable": "添加第一个自定义变量",
     "resetToDefault": "恢复默认",
     "confirmResetPrompt": "确定要将此提示词恢复为默认模板吗？您的自定义更改将会丢失。"
+  },
+  "parameterReview": {
+    "title": "提示词参数",
+    "subtitle": "查看所有工作流阶段的参数",
+    "effective": "已配置",
+    "notEffective": "未配置",
+    "effectiveCount": "{{effective}}/{{total}} 已配置",
+    "showAll": "显示全部",
+    "showEffectiveOnly": "仅显示已配置",
+    "showNotEffective": "仅显示未配置",
+    "parameter": "参数",
+    "value": "值",
+    "status": "状态",
+    "noValue": "(空)",
+    "inputParameters": "输入参数",
+    "outputParameters": "输出参数",
+    "derivedMappings": "派生变量映射",
+    "analysisField": "分析字段",
+    "templateVariable": "模板变量",
+    "usedIn": "使用于",
+    "populated": "已填充",
+    "expectedType": "期望类型",
+    "currentValue": "当前值",
+    "stages": {
+      "analysis": "分析",
+      "translation": "翻译",
+      "optimization": "优化",
+      "proofreading": "校对"
+    },
+    "namespaces": {
+      "project": "项目",
+      "content": "内容",
+      "context": "上下文",
+      "pipeline": "流水线",
+      "derived": "派生",
+      "meta": "元数据",
+      "user": "自定义"
+    }
   }
 }

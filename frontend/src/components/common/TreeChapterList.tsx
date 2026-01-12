@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronRight, ChevronDown, FileText, Folder, FolderOpen } from 'lucide-react'
 import { TocItem } from '../../services/api/client'
 import { useTranslation } from '../../stores/appStore'
@@ -19,6 +19,9 @@ interface TreeChapterListProps {
   expandAll?: boolean
   compact?: boolean
   minimal?: boolean
+  showCheckboxes?: boolean
+  selectedChapterIds?: Set<string>
+  chapterStatsMap?: Map<string, { translated: number; total: number }>
 }
 
 interface TocNodeProps {
@@ -31,6 +34,9 @@ interface TocNodeProps {
   compact?: boolean
   minimal?: boolean
   fontClasses?: FontClasses
+  showCheckboxes?: boolean
+  selectedChapterIds?: Set<string>
+  chapterStatsMap?: Map<string, { translated: number; total: number }>
 }
 
 function TocNode({
@@ -43,13 +49,11 @@ function TocNode({
   compact = false,
   minimal = false,
   fontClasses,
+  showCheckboxes = false,
+  selectedChapterIds,
+  chapterStatsMap,
 }: TocNodeProps) {
   const { t } = useTranslation()
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded)
-
-  const hasChildren = item.children && item.children.length > 0
-  const isClickable = item.chapter_id !== null
-  const isSelected = item.chapter_id === selectedChapterId
 
   // Check if this node or any descendant contains the selected chapter
   const containsSelected = useMemo(() => {
@@ -60,7 +64,96 @@ function TocNode({
     return checkSelected(item)
   }, [item, selectedChapterId])
 
+  // Auto-expand when contains selected chapter
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded || containsSelected)
+
+  const hasChildren = item.children && item.children.length > 0
+  const isClickable = item.chapter_id !== null
+  const isDirectlySelected = item.chapter_id === selectedChapterId
+
+  // For checkbox mode: collect all chapter IDs under this node (recursively)
+  const childChapterIds = useMemo(() => {
+    if (!showCheckboxes) return []
+
+    const collectChapterIds = (node: TocItem): string[] => {
+      const ids: string[] = []
+      // Add this node's chapter_id if it exists
+      if (node.chapter_id) {
+        ids.push(node.chapter_id)
+      }
+      // Recursively collect from all children
+      if (node.children && node.children.length > 0) {
+        node.children.forEach(child => {
+          ids.push(...collectChapterIds(child))
+        })
+      }
+      return ids
+    }
+
+    // For parent nodes, collect all descendant chapter IDs and deduplicate
+    // (parent and child might share the same chapter_id)
+    // For leaf nodes, just return the node's own ID
+    let ids: string[] = []
+    if (hasChildren) {
+      ids = collectChapterIds(item)
+    } else if (item.chapter_id) {
+      ids = [item.chapter_id]
+    }
+
+    // Deduplicate using Set to prevent toggling the same ID multiple times
+    return Array.from(new Set(ids))
+  }, [item, showCheckboxes, hasChildren])
+
+  // Check if all/some/none of children are selected
+  const allChildrenSelected = useMemo(() => {
+    if (!showCheckboxes || childChapterIds.length === 0) return false
+    return childChapterIds.every(id => selectedChapterIds?.has(id))
+  }, [showCheckboxes, childChapterIds, selectedChapterIds])
+
+  const someChildrenSelected = useMemo(() => {
+    if (!showCheckboxes || childChapterIds.length === 0) return false
+    return childChapterIds.some(id => selectedChapterIds?.has(id)) && !allChildrenSelected
+  }, [showCheckboxes, childChapterIds, selectedChapterIds, allChildrenSelected])
+
+  // Check if any child is directly selected
+  const hasSelectedChild = useMemo(() => {
+    if (!hasChildren) return false
+    return item.children.some(child => child.chapter_id === selectedChapterId)
+  }, [item.children, selectedChapterId, hasChildren])
+
+  // Only show as selected if directly selected AND no child is selected
+  // This prevents parent sections from being highlighted when their children are selected
+  const isSelected = isDirectlySelected && !hasSelectedChild
+
+  // Auto-expand when this node contains the selected chapter
+  useEffect(() => {
+    if (containsSelected && !expandAll && !minimal) {
+      setIsExpanded(true)
+    }
+  }, [containsSelected, expandAll, minimal])
+
+  // Sync with expandAll prop
+  useEffect(() => {
+    if (expandAll) {
+      setIsExpanded(true)
+    } else if (!containsSelected) {
+      // When collapsing all, only collapse nodes that don't contain selected chapter
+      setIsExpanded(false)
+    }
+  }, [expandAll, containsSelected])
+
   const handleClick = () => {
+    // In checkbox mode, clicking the row should only expand/collapse
+    // Selection should only happen via checkbox clicks
+    if (showCheckboxes) {
+      if (hasChildren && !expandAll && !minimal) {
+        setIsExpanded(!isExpanded)
+      }
+      // Don't call onSelectChapter in checkbox mode - only checkboxes should handle selection
+      return
+    }
+
+    // Normal mode (no checkboxes) - clicking selects the chapter
     if (isClickable) {
       onSelectChapter(item.chapter_id!)
     } else if (hasChildren && !expandAll && !minimal) {
@@ -77,14 +170,18 @@ function TocNode({
 
   const textSizeClass = minimal ? 'text-[10px]' : (fontClasses?.paragraph || 'text-sm')
   const badgeSizeClass = fontClasses?.xs || 'text-xs'
-  const isOpen = expandAll || minimal ? true : isExpanded
+  const isOpen = expandAll ? true : (minimal ? true : isExpanded)
   const paddingClasses = minimal ? 'py-[1px] px-1' : (compact ? 'py-1 px-1.5' : 'py-1.5 px-2')
   const leadingClass = minimal ? 'leading-tight' : ''
   const titleWeightClass = minimal ? (isSelected ? 'font-semibold' : 'font-normal') : (compact ? 'font-normal' : 'font-medium')
   const selectedSizeClass = minimal && isSelected ? 'text-xs' : ''
   const idleTextClass = compact ? 'text-gray-500 dark:text-gray-400' : 'text-gray-700 dark:text-gray-300'
   const groupTextClass = compact ? 'text-gray-500 dark:text-gray-400' : 'text-gray-600 dark:text-gray-400'
-  const cursorClass = isClickable ? 'cursor-pointer' : 'cursor-default'
+  // In checkbox mode, row is only clickable for expand/collapse (if has children) or not clickable at all
+  // In normal mode, row is clickable if chapter has content
+  const cursorClass = showCheckboxes
+    ? (hasChildren ? 'cursor-pointer' : 'cursor-default')
+    : (isClickable ? 'cursor-pointer' : 'cursor-default')
   const transitionClass = minimal ? '' : 'transition-colors'
   const selectedBgClass = minimal && isSelected ? 'bg-amber-100 dark:bg-amber-900/40' : ''
 
@@ -93,15 +190,20 @@ function TocNode({
       <div
         onClick={handleClick}
         className={`
-          flex items-center gap-1 ${textSizeClass} ${leadingClass} ${cursorClass} ${transitionClass} ${paddingClasses}
-          ${!minimal && isSelected ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : ''}
-          ${!minimal && !isSelected && isClickable ? `hover:bg-gray-50 dark:hover:bg-gray-700/50 ${idleTextClass}` : ''}
+          relative flex items-center gap-1 ${textSizeClass} ${leadingClass} ${cursorClass} ${transitionClass} ${paddingClasses} rounded
+          ${!minimal && !showCheckboxes && isSelected ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-50 font-semibold' : ''}
+          ${!minimal && !showCheckboxes && !isSelected && isClickable ? `hover:bg-gray-50 dark:hover:bg-gray-700/50 ${idleTextClass}` : ''}
+          ${!minimal && showCheckboxes ? `hover:bg-gray-50 dark:hover:bg-gray-700/50 ${idleTextClass}` : ''}
           ${!minimal && !isClickable && !hasChildren ? 'text-gray-400 dark:text-gray-500 cursor-default' : ''}
           ${!minimal && !isClickable && hasChildren ? groupTextClass : ''}
           ${selectedBgClass}
         `}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
       >
+        {/* Selected indicator - only show in non-checkbox mode */}
+        {!minimal && !showCheckboxes && isSelected && (
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l" />
+        )}
         {/* Expand/collapse toggle for items with children */}
         {hasChildren && !minimal ? (
           <button
@@ -118,14 +220,60 @@ function TocNode({
           <span className="w-4" /> // Spacer for alignment
         )}
 
+        {/* Checkbox */}
+        {showCheckboxes && (isClickable || hasChildren) && (
+          <input
+            type="checkbox"
+            checked={
+              item.chapter_id
+                ? selectedChapterIds?.has(item.chapter_id) || false
+                : allChildrenSelected
+            }
+            ref={(el) => {
+              if (el) {
+                el.indeterminate = hasChildren && someChildrenSelected
+              }
+            }}
+            onChange={(e) => {
+              e.stopPropagation()
+              if (hasChildren) {
+                // Node with children - toggle all descendants
+                // If ANY children are selected (all or some), deselect all
+                // If NO children are selected, select all
+                const anyChildrenSelected = childChapterIds.some(id => selectedChapterIds?.has(id))
+
+                if (anyChildrenSelected) {
+                  // Deselect all descendants
+                  childChapterIds.forEach(id => {
+                    if (selectedChapterIds?.has(id)) {
+                      onSelectChapter(id)
+                    }
+                  })
+                } else {
+                  // Select all descendants
+                  childChapterIds.forEach(id => {
+                    if (!selectedChapterIds?.has(id)) {
+                      onSelectChapter(id)
+                    }
+                  })
+                }
+              } else if (item.chapter_id) {
+                // Leaf node with no children - just toggle this chapter
+                onSelectChapter(item.chapter_id)
+              }
+            }}
+            className="mr-2 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+          />
+        )}
+
         {/* Icon */}
-        {hasChildren && !minimal ? (
+        {!showCheckboxes && hasChildren && !minimal ? (
           isOpen ? (
             <FolderOpen className="w-4 h-4 text-amber-500" />
           ) : (
             <Folder className="w-4 h-4 text-amber-500" />
           )
-        ) : !minimal ? (
+        ) : !showCheckboxes && !minimal ? (
           <FileText className={`w-4 h-4 ${isClickable ? 'text-blue-500' : 'text-gray-400'}`} />
         ) : null}
 
@@ -134,8 +282,15 @@ function TocNode({
           {item.title || t('preview.untitled')}
         </span>
 
-        {/* Paragraph count badge */}
-        {!minimal && item.paragraph_count !== null && item.paragraph_count > 0 && (
+        {/* Chapter stats (translated/total) */}
+        {!minimal && item.chapter_id && chapterStatsMap?.has(item.chapter_id) && (
+          <span className={`${badgeSizeClass} text-gray-500 dark:text-gray-400 ml-1 whitespace-nowrap`}>
+            {chapterStatsMap.get(item.chapter_id)!.translated} / {chapterStatsMap.get(item.chapter_id)!.total}
+          </span>
+        )}
+
+        {/* Paragraph count badge (fallback) */}
+        {!minimal && !chapterStatsMap && item.paragraph_count !== null && item.paragraph_count > 0 && (
           <span className={`${badgeSizeClass} text-gray-400 dark:text-gray-500 ml-1`}>
             {item.paragraph_count}
           </span>
@@ -157,6 +312,9 @@ function TocNode({
               compact={compact}
               minimal={minimal}
               fontClasses={fontClasses}
+              showCheckboxes={showCheckboxes}
+              selectedChapterIds={selectedChapterIds}
+              chapterStatsMap={chapterStatsMap}
             />
           ))}
         </div>
@@ -173,6 +331,9 @@ export function TreeChapterList({
   expandAll = false,
   compact = false,
   minimal = false,
+  showCheckboxes = false,
+  selectedChapterIds,
+  chapterStatsMap,
 }: TreeChapterListProps) {
   const { t } = useTranslation()
 
@@ -195,11 +356,14 @@ export function TreeChapterList({
           level={0}
           selectedChapterId={selectedChapterId}
           onSelectChapter={onSelectChapter}
-          defaultExpanded={true}
+          defaultExpanded={expandAll}
           expandAll={expandAll}
           compact={compact}
           minimal={minimal}
           fontClasses={fontClasses}
+          showCheckboxes={showCheckboxes}
+          selectedChapterIds={selectedChapterIds}
+          chapterStatsMap={chapterStatsMap}
         />
       ))}
     </div>
