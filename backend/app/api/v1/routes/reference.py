@@ -13,6 +13,7 @@ from app.config import settings
 from app.models.database import get_db, ReferenceEPUB
 from app.core.matching.service import matching_service
 from app.core.epub import EPUBParser
+from app.core.project_storage import ProjectStorage
 
 router = APIRouter()
 
@@ -98,8 +99,12 @@ async def upload_reference_epub(
     if not file.filename.endswith(".epub"):
         raise HTTPException(status_code=400, detail="Only EPUB files are allowed")
 
-    # Save file
-    file_path = settings.upload_dir / f"ref_{project_id}_{file.filename}"
+    # Ensure uploads directory exists
+    uploads_dir = ProjectStorage.get_uploads_dir(project_id)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save to project-scoped location
+    file_path = ProjectStorage.get_reference_epub_path(project_id)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 

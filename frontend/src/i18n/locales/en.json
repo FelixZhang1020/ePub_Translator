@@ -18,7 +18,12 @@
     "show": "Show",
     "hide": "Hide",
     "progress": "Progress",
-    "items": "items"
+    "items": "items",
+    "selectAll": "Select All",
+    "deselectAll": "Deselect All",
+    "continue": "Continue",
+    "apply": "Apply",
+    "dismiss": "Dismiss"
   },
   "app": {
     "title": "EPUB Translator"
@@ -164,6 +169,7 @@
     "statusPaused": "Paused",
     "statusFailed": "Failed",
     "statusPending": "Pending",
+    "noChapterSelected": "No chapter selected",
     "exportEpub": "Export EPUB",
     "referenceLoaded": "Reference loaded",
     "uploadReference": "Upload Chinese Reference",
@@ -211,7 +217,12 @@
     "completeTranslation": "Complete Translation",
     "translationConfirmed": "Completed",
     "continueTranslating": "Continue Translating",
-    "resetTranslationStatus": "Reset to continue translating"
+    "resetTranslationStatus": "Reset to continue translating",
+    "cancelStuckTasks": "Cancel Stuck Tasks",
+    "cancelingTasks": "Canceling...",
+    "unlockToEdit": "Unlock to edit or retranslate",
+    "locked": "Locked",
+    "unlocked": "Unlocked"
   },
   "preview": {
     "chapterList": "Chapter List",
@@ -226,11 +237,14 @@
     "showTranslation": "Show Translation",
     "showBilingual": "Bilingual",
     "noContent": "No content available",
-    "imageLoadError": "Image failed to load"
+    "imageLoadError": "Image failed to load",
+    "expandAll": "Expand All",
+    "collapseAll": "Collapse All"
   },
   "workflow": {
     "analysis": "Analysis",
     "translation": "Translation",
+    "translating": "Translating",
     "proofreading": "Proofreading",
     "export": "Export",
     "continueToTranslation": "Continue to Translation",
@@ -289,10 +303,14 @@
     "applyChanges": "Apply Changes",
     "noPending": "No pending suggestions",
     "noSuggestions": "No suggestions found",
+    "noSuggestionsGenerated": "No Suggestions Generated",
+    "noSuggestionsHint": "The proofreading session completed but did not generate any suggestions. This may happen if all translations were skipped or if errors occurred during processing.",
     "originalText": "Original Text",
     "currentTranslation": "Current Translation",
     "suggestedTranslation": "Suggested Translation",
     "explanation": "Reason",
+    "feedback": "Feedback",
+    "acknowledge": "Acknowledge",
     "accept": "Accept",
     "reject": "Reject",
     "modified": "Modified",
@@ -309,7 +327,27 @@
     "shortcutAccept": "Accept",
     "shortcutReject": "Reject",
     "shortcutEdit": "Edit",
-    "shortcutNav": "Navigate"
+    "shortcutNav": "Navigate",
+    "backToTranslation": "Back to Translation",
+    "selectChapters": "Select Chapters",
+    "selectChaptersHint": "Choose which chapters to proofread (leave empty to proofread all)",
+    "allChaptersSelected": "All chapters will be proofread",
+    "chaptersSelected": "{{count}} chapter(s) selected",
+    "cancel": "Cancel",
+    "startFailed": "Proofreading Failed",
+    "loadingSuggestions": "Loading suggestions...",
+    "sessionDetails": "Session Details",
+    "totalParagraphs": "Total paragraphs",
+    "completedParagraphs": "Completed paragraphs",
+    "confirm": "Lock translation",
+    "unlock": "Unlock translation",
+    "translationLocked": "Translation locked",
+    "translationUnlocked": "Translation unlocked",
+    "lockToAccept": "Click lock icon to mark as accepted",
+    "askLLM": "Recommend",
+    "getRecommendation": "Get LLM recommendation",
+    "recommendedTranslation": "Recommended Translation",
+    "applyRecommendation": "Apply this recommendation"
   },
   "export": {
     "title": "Export",
@@ -452,5 +490,43 @@
     "addFirstVariable": "Add your first custom variable",
     "resetToDefault": "Reset to Default",
     "confirmResetPrompt": "Are you sure you want to reset this prompt to the default template? Your custom changes will be lost."
+  },
+  "parameterReview": {
+    "title": "Prompt Parameters",
+    "subtitle": "Review parameters across all workflow stages",
+    "effective": "Effective",
+    "notEffective": "Not Configured",
+    "effectiveCount": "{{effective}}/{{total}} effective",
+    "showAll": "Show All",
+    "showEffectiveOnly": "Effective Only",
+    "showNotEffective": "Not Configured Only",
+    "parameter": "Parameter",
+    "value": "Value",
+    "status": "Status",
+    "noValue": "(empty)",
+    "inputParameters": "Input Parameters",
+    "outputParameters": "Output Parameters",
+    "derivedMappings": "Derived Variable Mappings",
+    "analysisField": "Analysis Field",
+    "templateVariable": "Template Variable",
+    "usedIn": "Used In",
+    "populated": "Populated",
+    "expectedType": "Expected Type",
+    "currentValue": "Current Value",
+    "stages": {
+      "analysis": "Analysis",
+      "translation": "Translation",
+      "optimization": "Optimization",
+      "proofreading": "Proofreading"
+    },
+    "namespaces": {
+      "project": "Project",
+      "content": "Content",
+      "context": "Context",
+      "pipeline": "Pipeline",
+      "derived": "Derived",
+      "meta": "Meta",
+      "user": "Custom"
+    }
   }
 }

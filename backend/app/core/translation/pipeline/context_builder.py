@@ -65,10 +65,15 @@ class ContextBuilder:
 
         Returns:
             Complete TranslationContext ready for pipeline
+
+        Raises:
+            ValueError: If paragraph.original_text is None or cannot be recovered
         """
+        source_text = await self._validate_and_get_source_text(paragraph)
+
         # 1. Build source material
         source = SourceMaterial(
-            text=paragraph.original_text,
+            text=source_text,
             language="en",
             paragraph_index=paragraph.paragraph_number,
             chapter_index=(
@@ -194,7 +199,7 @@ class ContextBuilder:
             AdjacentContext with previous paragraph info, or None
         """
         # Import here to avoid circular imports
-        from app.models.database import Paragraph, Translation
+        from app.models.database import Paragraph
 
         # Get previous paragraph in same chapter
         prev_para_query = (
@@ -278,6 +283,54 @@ class ContextBuilder:
 
         return None
 
+    async def _validate_and_get_source_text(self, paragraph) -> str:
+        """Validate paragraph has source text, attempting recovery if needed.
+
+        Args:
+            paragraph: Paragraph model to validate
+
+        Returns:
+            The validated source text
+
+        Raises:
+            ValueError: If source text is None and cannot be recovered
+        """
+        paragraph_id = getattr(paragraph, "id", "unknown")
+        paragraph_num = getattr(paragraph, "paragraph_number", "unknown")
+        source_text = getattr(paragraph, "original_text", None)
+
+        if source_text is None:
+            logger.warning(
+                f"paragraph.original_text is None for paragraph_id={paragraph_id}, "
+                f"paragraph_number={paragraph_num}, attempting database refresh"
+            )
+            try:
+                await self.session.refresh(paragraph, ["original_text"])
+                source_text = paragraph.original_text
+                if source_text is not None:
+                    logger.info(
+                        f"Successfully refreshed paragraph {paragraph_id}, "
+                        f"original_text length={len(source_text)}"
+                    )
+            except Exception as e:
+                logger.error(f"Failed to refresh paragraph {paragraph_id}: {e}")
+
+        if source_text is None:
+            raise ValueError(
+                f"Source text is None for paragraph {paragraph_id}. "
+                "Cannot build translation context without source text."
+            )
+
+        if not source_text.strip():
+            logger.warning(f"Source text is empty for paragraph_id={paragraph_id}")
+
+        logger.debug(
+            f"Building context for paragraph_id={paragraph_id}, "
+            f"source_text_len={len(source_text)}"
+        )
+
+        return source_text
+
     async def _load_prompts_from_files(
         self,
         project,
@@ -359,9 +412,12 @@ class ContextBuilder:
     ) -> Dict[str, Any]:
         """Build variables dictionary for template rendering.
 
+        Note: This method assumes paragraph.original_text has been validated
+        by the caller (build() method). It will not re-validate.
+
         Args:
             project: Project model
-            paragraph: Paragraph model
+            paragraph: Paragraph model (must have validated original_text)
             book_analysis: Book analysis context
             adjacent: Adjacent context
             existing: Existing translation
@@ -370,21 +426,23 @@ class ContextBuilder:
         Returns:
             Dictionary with all template variables
         """
-        variables: Dict[str, Any] = {}
+        source_text = paragraph.original_text
 
         # Project variables
-        variables["project"] = {
-            "title": getattr(project, "title", None) or getattr(project, "epub_title", ""),
-            "author": getattr(project, "author", None) or getattr(project, "epub_author", ""),
-            "author_background": getattr(project, "author_background", ""),
-            "source_language": getattr(project, "source_language", "en"),
-            "target_language": getattr(project, "target_language", "zh"),
+        variables: Dict[str, Any] = {
+            "project": {
+                "title": getattr(project, "title", None) or getattr(project, "epub_title", ""),
+                "author": getattr(project, "author", None) or getattr(project, "epub_author", ""),
+                "author_background": getattr(project, "author_background", ""),
+                "source_language": getattr(project, "source_language", "en"),
+                "target_language": getattr(project, "target_language", "zh"),
+            }
         }
 
         # Content variables
         variables["content"] = {
-            "source": paragraph.original_text,
-            "source_text": paragraph.original_text,  # legacy alias
+            "source": source_text,
+            "source_text": source_text,  # legacy alias
         }
 
         # Add target for optimization/proofreading
@@ -413,7 +471,7 @@ class ContextBuilder:
 
         # Derived variables (from book analysis)
         if book_analysis:
-            derived = {
+            derived: Dict[str, Any] = {
                 "author_name": book_analysis.author_name,
                 "author_biography": book_analysis.author_biography,
                 "writing_style": book_analysis.writing_style,
@@ -461,13 +519,11 @@ class ContextBuilder:
 
         # Meta variables
         variables["meta"] = {
-            "word_count": len(paragraph.original_text.split()),
-            "char_count": len(paragraph.original_text),
-            "paragraph_index": paragraph.paragraph_number,
+            "word_count": len(source_text.split()),
+            "char_count": len(source_text),
+            "paragraph_index": getattr(paragraph, "paragraph_number", 0),
             "stage": prompt_type,
         }
-
-        # Add chapter index if available
         if hasattr(paragraph, "chapter") and paragraph.chapter:
             variables["meta"]["chapter_index"] = paragraph.chapter.chapter_number
 

@@ -124,13 +124,33 @@ async def get_chapters(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all chapters for a project."""
+    """Get all chapters for a project with translation progress."""
+    from sqlalchemy import func, case
+
+    # Get chapters with translated paragraph counts
     result = await db.execute(
-        select(Chapter)
+        select(
+            Chapter.id,
+            Chapter.chapter_number,
+            Chapter.title,
+            Chapter.paragraph_count,
+            Chapter.word_count,
+            func.count(
+                func.distinct(
+                    case(
+                        (Translation.translated_text.isnot(None) & (Translation.translated_text != ""), Paragraph.id)
+                    )
+                )
+            ).label("translated_count")
+        )
+        .select_from(Chapter)
+        .outerjoin(Paragraph, Paragraph.chapter_id == Chapter.id)
+        .outerjoin(Translation, Translation.paragraph_id == Paragraph.id)
         .where(Chapter.project_id == project_id)
+        .group_by(Chapter.id, Chapter.chapter_number, Chapter.title, Chapter.paragraph_count, Chapter.word_count)
         .order_by(Chapter.chapter_number)
     )
-    chapters = result.scalars().all()
+    chapters = result.all()
     return [
         {
             "id": c.id,
@@ -138,6 +158,7 @@ async def get_chapters(
             "title": c.title,
             "paragraph_count": c.paragraph_count,
             "word_count": c.word_count,
+            "translated_count": c.translated_count,
         }
         for c in chapters
     ]
@@ -280,6 +301,7 @@ async def get_chapter_content(
             "translation_id": latest_translation.id if latest_translation else None,
             "translation_provider": latest_translation.provider if latest_translation else None,
             "is_manual_edit": latest_translation.is_manual_edit if latest_translation else False,
+            "is_confirmed": latest_translation.is_confirmed if latest_translation else False,
         })
 
     # Format image URLs with API path

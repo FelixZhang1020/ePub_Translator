@@ -17,7 +17,7 @@ from .service import (
     ProviderInfo,
     CostEstimate,
 )
-from .config import LLMConfigManager, llm_config
+
 from .config_service import LLMConfigService, llm_config_service, ResolvedLLMConfig
 
 __all__ = [
@@ -26,8 +26,7 @@ __all__ = [
     "ModelInfo",
     "ProviderInfo",
     "CostEstimate",
-    "LLMConfigManager",
-    "llm_config",
+
     "LLMConfigService",
     "llm_config_service",
     "ResolvedLLMConfig",

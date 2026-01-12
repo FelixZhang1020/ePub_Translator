@@ -7,8 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.llm import llm_service, llm_config, ModelInfo, ProviderInfo
-from app.core.llm.config import LLMProviderConfig, LLMModelConfig
+from app.core.llm import llm_service, ModelInfo, ProviderInfo
 from app.core.llm.config_service import LLMConfigService, llm_config_service
 from app.models.database import get_db
 
@@ -28,13 +27,7 @@ class EstimateCostRequest(BaseModel):
     output_ratio: float = 1.5  # Chinese output typically 1.5x English input
 
 
-class AddProviderRequest(BaseModel):
-    """Request to add a custom provider."""
-    name: str
-    display_name: str
-    api_key_env_var: str
-    base_url: Optional[str] = None
-    models: list[dict]
+
 
 
 # ========== New LiteLLM-based endpoints ==========
@@ -145,63 +138,6 @@ async def estimate_cost(request: EstimateCostRequest):
 async def list_all_litellm_models() -> list[str]:
     """List all models available in LiteLLM (for debugging/discovery)."""
     return llm_service.get_all_litellm_models()
-
-
-# ========== Legacy endpoints (for backwards compatibility) ==========
-
-
-@router.get("/llm/config/providers")
-async def list_config_providers():
-    """[Legacy] List configured LLM providers and their models."""
-    providers = llm_config.get_providers()
-    return [
-        {
-            "name": p.name,
-            "display_name": p.display_name,
-            "models": [m.model_dump() for m in p.models],
-            "requires_api_key": True,
-            "has_env_key": llm_config.get_api_key(p.name) is not None,
-        }
-        for p in providers
-    ]
-
-
-@router.get("/llm/config/providers/{provider_name}")
-async def get_config_provider(provider_name: str):
-    """[Legacy] Get a specific provider configuration."""
-    provider = llm_config.get_provider(provider_name)
-    if not provider:
-        raise HTTPException(status_code=404, detail=f"Provider '{provider_name}' not found")
-    return {
-        "name": provider.name,
-        "display_name": provider.display_name,
-        "models": [m.model_dump() for m in provider.models],
-        "base_url": provider.base_url,
-        "has_env_key": llm_config.get_api_key(provider_name) is not None,
-    }
-
-
-@router.post("/llm/config/providers")
-async def add_config_provider(request: AddProviderRequest):
-    """[Legacy] Add or update a custom LLM provider."""
-    provider = LLMProviderConfig(
-        name=request.name,
-        display_name=request.display_name,
-        api_key_env_var=request.api_key_env_var,
-        base_url=request.base_url,
-        models=[LLMModelConfig(**m) for m in request.models],
-    )
-    llm_config.add_provider(provider)
-    llm_config.save_config()
-    return {"status": "added", "provider": request.name}
-
-
-@router.delete("/llm/config/providers/{provider_name}")
-async def remove_config_provider(provider_name: str):
-    """[Legacy] Remove a custom LLM provider."""
-    llm_config.remove_provider(provider_name)
-    llm_config.save_config()
-    return {"status": "removed", "provider": provider_name}
 
 
 # ========== Database-backed LLM Configuration Endpoints ==========

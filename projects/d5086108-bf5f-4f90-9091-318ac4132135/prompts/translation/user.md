@@ -33,4 +33,4 @@
 - 不添加原文未表达的解释或总结
 
 英文原文：
-{{content.source_text}}
+{{content.source}}

@@ -80,7 +80,7 @@ class ProofreadingSuggestion(Base):
 
     # Translation versions
     original_translation: Mapped[str] = mapped_column(Text, nullable=False)
-    suggested_translation: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_translation: Mapped[Optional[str]] = mapped_column(Text)
     explanation: Mapped[Optional[str]] = mapped_column(Text)
 
     # Improvement assessment (from enhanced proofreading v2)

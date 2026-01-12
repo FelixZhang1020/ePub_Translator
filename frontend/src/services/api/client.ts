@@ -13,6 +13,10 @@ export interface Project {
   total_paragraphs: number
   is_favorite: boolean
   created_at: string
+  epub_title: string | null
+  epub_author: string | null
+  epub_language: string | null
+  author_background: string | null
 }
 
 export interface Chapter {
@@ -21,6 +25,7 @@ export interface Chapter {
   title: string | null
   paragraph_count: number
   word_count: number
+  translated_count: number
 }
 
 export interface Paragraph {
@@ -32,6 +37,7 @@ export interface Paragraph {
   translation_id: string | null
   translation_provider: string | null
   is_manual_edit: boolean
+  is_confirmed: boolean
 }
 
 export interface ChapterImage {
@@ -134,6 +140,12 @@ export interface WorkflowStatus {
   translation_completed: boolean
   proofreading_completed: boolean
   analysis_progress?: {
+    has_task?: boolean
+    task_id?: string
+    status?: string
+    progress?: number
+    current_step?: string
+    step_message?: string
     exists: boolean
     confirmed: boolean
   }
@@ -289,11 +301,27 @@ export interface ProofreadingSuggestion {
   id: string
   paragraph_id: string
   original_text: string | null
-  original_translation: string
-  suggested_translation: string
+  original_translation: string  // Snapshot when suggestion was created
+  current_translation: string | null  // Actual current translation (may be edited)
+  suggested_translation: string | null
   explanation: string | null
   status: string
   user_modified_text: string | null
+  created_at: string
+  improvement_level?: string
+  issue_types?: string[]
+  is_confirmed: boolean
+}
+
+export interface TranslationDetails {
+  id: string
+  paragraph_id: string
+  translated_text: string
+  is_confirmed: boolean
+  is_manual_edit: boolean
+  version: number
+  provider: string
+  model: string
   created_at: string
 }
 
@@ -508,6 +536,60 @@ export interface AvailableVariablesResponse {
   user: AvailableVariable[]
 }
 
+// Parameter Review
+export interface ParameterInfo {
+  name: string                    // e.g., "project.title"
+  namespace: string               // e.g., "project"
+  short_name: string              // e.g., "title"
+  value: unknown                  // Current value
+  value_preview: string           // Truncated preview
+  is_effective: boolean           // True if non-empty
+  value_type: string              // "string", "list", "object", "boolean"
+  description?: string
+  stages: string[]                // Which stages this is available in
+}
+
+export interface OutputFieldInfo {
+  name: string                    // e.g., "writing_style"
+  description: string             // What this field contains
+  value_type: string              // "string", "list", "object", "boolean"
+  current_value?: unknown         // Actual value if populated
+  is_populated: boolean           // Whether this field has a value
+}
+
+export interface DerivedMapping {
+  source: string        // Source field in raw analysis
+  target: string        // Target derived variable
+  transform: string     // Transform function name (empty if none)
+  used_in: string[]     // Which stages use this variable
+}
+
+export interface StageParameterReview {
+  stage: string                   // "analysis", "translation", etc.
+  template_name: string           // Current template being used
+
+  // Input parameters (what goes INTO the LLM call)
+  input_parameters: ParameterInfo[]
+  input_effective_count: number
+  input_total_count: number
+
+  // Output parameters (what the LLM produces - for stages with structured output)
+  output_fields?: OutputFieldInfo[]       // Undefined for plain-text stages
+  output_populated_count?: number
+  has_structured_output: boolean          // True for analysis/proofreading
+
+  // For analysis stage: show mapping to derived variables
+  derived_mappings?: DerivedMapping[]
+}
+
+export interface ParameterReviewResponse {
+  project_id: string
+  project_name: string
+  analysis_completed: boolean     // Whether analysis has run
+  stages: StageParameterReview[]
+  summary: Record<string, number> // overall stats
+}
+
 export const api = {
   // Projects
   async getProjects(): Promise<Project[]> {
@@ -605,11 +687,6 @@ export const api = {
     return data
   },
 
-  async getProviderModels(provider: string): Promise<ModelInfo[]> {
-    const { data } = await client.get(`/llm/models/${provider}`)
-    return data
-  },
-
   async testConnection(request: {
     model: string
     api_key?: string
@@ -695,6 +772,21 @@ export const api = {
 
   async resetTranslationStatus(projectId: string): Promise<{ project_id: string; translation_completed: boolean; current_step: string }> {
     const { data } = await client.post(`/workflow/${projectId}/reset-translation-status`)
+    return data
+  },
+
+  async confirmProofreading(projectId: string): Promise<{ project_id: string; proofreading_completed: boolean; current_step: string }> {
+    const { data } = await client.post(`/workflow/${projectId}/confirm-proofreading`)
+    return data
+  },
+
+  async cancelStuckTasks(projectId: string): Promise<{ project_id: string; cancelled_tasks: number; message: string }> {
+    const { data } = await client.post(`/workflow/${projectId}/cancel-stuck-tasks`)
+    return data
+  },
+
+  async cancelAnalysisTask(projectId: string): Promise<{ project_id: string; cancelled: boolean; message: string }> {
+    const { data } = await client.post(`/workflow/${projectId}/cancel-analysis-task`)
     return data
   },
 
@@ -919,8 +1011,8 @@ export const api = {
     return data
   },
 
-  // Clear all translations for a chapter
-  async clearChapterTranslations(chapterId: string): Promise<{ deleted_count: number; chapter_id: string }> {
+  // Clear all translations for a chapter (preserves locked translations)
+  async clearChapterTranslations(chapterId: string): Promise<{ deleted_count: number; skipped_locked: number; chapter_id: string }> {
     const { data } = await client.delete(`/translation/chapter/${chapterId}`)
     return data
   },
@@ -958,24 +1050,47 @@ export const api = {
     return data
   },
 
+  async cancelProofreadingSession(sessionId: string): Promise<ProofreadingSession> {
+    const { data } = await client.post(`/proofreading/session/${sessionId}/cancel`)
+    return data
+  },
+
   async getPendingSuggestionsCount(projectId: string): Promise<{ pending_count: number }> {
     const { data } = await client.get(`/proofreading/${projectId}/pending-count`)
     return data
   },
 
-  // Legacy Prompts (file-based, simple endpoint)
-  async getLegacyPromptTemplate(promptType: string): Promise<PromptTemplate> {
-    const { data } = await client.get(`/prompts/${promptType}`)
+  async getQuickRecommendation(request: {
+    original_text: string
+    current_translation: string
+    feedback: string
+    config_id?: string
+  }): Promise<{ recommended_translation: string }> {
+    const { data } = await client.post('/proofreading/quick-recommendation', request)
     return data
   },
 
-  async updateLegacyPromptTemplate(promptType: string, systemPrompt: string): Promise<PromptTemplate> {
-    const { data } = await client.put(`/prompts/${promptType}`, {
-      system_prompt: systemPrompt,
+  // Translation management for paragraph-level
+  async getTranslationDetails(paragraphId: string): Promise<TranslationDetails> {
+    const { data } = await client.get(`/translation/paragraph/${paragraphId}`)
+    return data
+  },
+
+  async updateParagraphTranslation(paragraphId: string, translatedText: string): Promise<TranslationDetails> {
+    const { data } = await client.put(`/translation/paragraph/${paragraphId}`, {
+      translated_text: translatedText,
     })
     return data
   },
 
+  async lockTranslation(paragraphId: string, isConfirmed: boolean = true): Promise<TranslationDetails> {
+    const { data } = await client.put(`/translation/paragraph/${paragraphId}/confirm`, {
+      is_confirmed: isConfirmed,
+    })
+    return data
+  },
+
+  // Prompt Preview (still used by PromptPreviewModal)
   async previewPrompt(promptType: string, variables: Record<string, unknown>, customSystemPrompt?: string, customUserPrompt?: string): Promise<PromptPreview> {
     const { data } = await client.post(`/prompts/${promptType}/preview`, {
       variables,
@@ -1174,6 +1289,12 @@ export const api = {
   async getAvailableVariables(projectId: string, stage?: string): Promise<AvailableVariablesResponse> {
     const params = stage ? { stage } : {}
     const { data } = await client.get(`/prompts/projects/${projectId}/available-variables`, { params })
+    return data
+  },
+
+  // Parameter Review
+  async getParameterReview(projectId: string): Promise<ParameterReviewResponse> {
+    const { data } = await client.get(`/prompts/projects/${projectId}/parameter-review`)
     return data
   },
 }

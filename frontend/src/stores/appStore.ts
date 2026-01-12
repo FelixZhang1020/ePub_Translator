@@ -74,6 +74,21 @@ export interface TranslationProgressForStep {
   totalParagraphs: number
 }
 
+// Analysis progress for step indicator
+export interface AnalysisProgressForStep {
+  exists: boolean
+  confirmed: boolean
+}
+
+// Proofreading progress for step indicator
+export interface ProofreadingProgressForStep {
+  hasSession: boolean
+  status?: string
+  roundNumber?: number
+  progress?: number
+  pendingSuggestions?: number
+}
+
 // Workflow step status for header display
 export interface WorkflowStepStatus {
   projectId: string
@@ -81,7 +96,9 @@ export interface WorkflowStepStatus {
   analysisCompleted: boolean
   translationCompleted: boolean
   proofreadingCompleted: boolean
+  analysisProgress?: AnalysisProgressForStep
   translationProgress?: TranslationProgressForStep
+  proofreadingProgress?: ProofreadingProgressForStep
 }
 
 // Panel width settings for resizable layout
@@ -117,6 +134,10 @@ interface AppState {
   // Workflow Step Status (for header display)
   workflowStatus: WorkflowStepStatus | null
   setWorkflowStatus: (status: WorkflowStepStatus | null) => void
+
+  // Analysis Running State (for header display)
+  isAnalyzing: boolean
+  setIsAnalyzing: (isAnalyzing: boolean) => void
 
   // Panel Widths (for resizable layout)
   panelWidths: PanelWidths
@@ -191,6 +212,7 @@ export const useAppStore = create<AppState>()(
       fontSize: 'medium',
       translationProgress: null,
       workflowStatus: null,
+      isAnalyzing: false,
       panelWidths: DEFAULT_PANEL_WIDTHS,
 
       setLanguage: (language) => {
@@ -219,6 +241,10 @@ export const useAppStore = create<AppState>()(
 
       setWorkflowStatus: (workflowStatus) => {
         set({ workflowStatus })
+      },
+
+      setIsAnalyzing: (isAnalyzing) => {
+        set({ isAnalyzing })
       },
 
       setPanelWidth: (panel, width) => {

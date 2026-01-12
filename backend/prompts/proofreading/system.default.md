@@ -13,10 +13,12 @@
 - 修正明显不自然或影响理解的表达
 - 在不改变含义的前提下微调用词和句式
 
-{{#if derived.writing_style || derived.tone}}
+{{#if derived.writing_style}}
 **风格要求：**
-{{#if derived.writing_style}}写作风格：{{derived.writing_style}}{{/if}}
-{{#if derived.tone}}语气：{{derived.tone}}{{/if}}
+写作风格：{{derived.writing_style}}
+{{/if}}
+{{#if derived.tone}}
+**语气：**{{derived.tone}}
 {{/if}}
 
 **你不可以：**
@@ -65,7 +67,6 @@
   "needs_improvement": true,
   "improvement_level": "none | optional | recommended | critical",
   "issue_types": ["accuracy", "naturalness", "modern_usage", "style_consistency", "readability"],
-  "suggested_translation": "修改后的完整译文（如无需修改，保持原译文）",
-  "explanation": "简要说明是否需要修改，以及主要问题与修改理由（1-2 句话）"
+  "explanation": "【必须填写】详细说明译文的优缺点。如果有问题，请具体指出问题所在及改进建议；如果质量良好，请说明优点。此字段为核心反馈内容，必须详细且有建设性。"
 }
 ```

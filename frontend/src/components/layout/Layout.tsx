@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, useMemo } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { BookOpen, Settings, Home, Loader2, Languages, FileCheck, Download, Check, FileText } from 'lucide-react'
 import { ThemeToggle } from '../common/ThemeToggle'
@@ -15,46 +15,67 @@ function HeaderStepIndicator({
 }) {
   const { t } = useTranslation()
 
-  const steps = [
-    { id: 'analysis', icon: BookOpen, label: t('workflow.analysis') },
-    { id: 'translation', icon: Languages, label: t('workflow.translation') },
-    { id: 'proofreading', icon: FileCheck, label: t('workflow.proofreading') },
-    { id: 'export', icon: Download, label: t('workflow.export') },
-  ]
+  // Get analysis running state from global store
+  const isAnalyzing = useAppStore((state) => state.isAnalyzing)
+
+  // Check if any step is actively running
+  const translationStatus = status.translationProgress?.status
+  const isTranslationRunning = status.translationProgress?.hasTask &&
+    (translationStatus === 'processing' || translationStatus === 'pending')
+
+  const proofreadingStatus = status.proofreadingProgress?.status
+  const isProofreadingRunning = status.proofreadingProgress?.hasSession &&
+    (proofreadingStatus === 'processing' || proofreadingStatus === 'pending')
+
+  // Translation is only marked as finished when user explicitly clicks "Complete Translation" button
+  const translationFinished = status.translationCompleted
+
+  // Build steps array - fixed structure
+  const steps = useMemo(() => {
+    const baseSteps = [
+      { id: 'analysis', icon: BookOpen, label: t('workflow.analysis') },
+      { id: 'translation', icon: Languages, label: t('workflow.translation') },
+      { id: 'proofreading', icon: FileCheck, label: t('workflow.proofreading') },
+      { id: 'export', icon: Download, label: t('workflow.export') },
+    ]
+
+    return baseSteps
+  }, [t])
 
   // Status types:
   // - completed: Step is fully done (green checkmark)
-  // - in_progress: Step is actively being processed (animated)
+  // - in_progress: Step is actively being processed (animated orange spinning)
   // - current: On this step but not processing
   // - upcoming: Not accessible yet
   const getStepStatus = (stepId: string): 'completed' | 'in_progress' | 'current' | 'upcoming' => {
-    // Analysis: completed when confirmed, regardless of current page
+    // Analysis: show in_progress when analyzing (highest priority), then completed when confirmed
     if (stepId === 'analysis') {
+      // Show orange spinning when LLM is actively analyzing (check this first!)
+      if (isAnalyzing) return 'in_progress'
       if (status.analysisCompleted) return 'completed'
       if (status.currentStep === 'analysis') return 'current'
       return 'upcoming'
     }
 
-    // Translation: completed when done, in_progress when has partial content
+    // Translation: show in_progress while running (highest priority), then completed when finished
     if (stepId === 'translation') {
-      if (status.translationCompleted) return 'completed'
-      // Check if translation is in progress (has partial content or actively processing)
-      if (status.translationProgress?.hasTask) {
-        const isProcessing = status.translationProgress.status === 'processing' || status.translationProgress.status === 'pending'
-        const hasPartialContent = status.translationProgress.completedParagraphs > 0
-        if (isProcessing || hasPartialContent) return 'in_progress'
-      }
+      // Show orange spinning when LLM is actively translating (check this first!)
+      if (isTranslationRunning) return 'in_progress'
+      if (translationFinished) return 'completed'
       if (status.currentStep === 'translation') return 'current'
       return 'upcoming'
     }
 
-    // Proofreading and Export: keep simple for now
+    // Proofreading: show in_progress while running (highest priority), then completed when finished
     if (stepId === 'proofreading') {
+      // Show orange spinning when LLM is actively proofreading (check this first!)
+      if (isProofreadingRunning) return 'in_progress'
       if (status.proofreadingCompleted) return 'completed'
       if (status.currentStep === 'proofreading') return 'current'
       return 'upcoming'
     }
 
+    // Export: simple state for now (no LLM processing)
     if (stepId === 'export') {
       if (status.currentStep === 'export') return 'current'
       return 'upcoming'
@@ -70,7 +91,7 @@ function HeaderStepIndicator({
     if (targetIndex <= currentIndex) return true
     if (stepId === 'translation') return status.analysisCompleted
     if (stepId === 'proofreading') return status.translationCompleted
-    if (stepId === 'export') return true
+    if (stepId === 'export') return status.proofreadingCompleted
     return false
   }
 
@@ -159,7 +180,6 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const fontSize = useAppStore((state) => state.fontSize)
-  const translationProgress = useAppStore((state) => state.translationProgress)
   const workflowStatus = useAppStore((state) => state.workflowStatus)
   const globalFontClass = globalFontSizeClass[fontSize]
   const fontClasses = fontSizeClasses[fontSize]
@@ -208,33 +228,9 @@ export function Layout({ children }: LayoutProps) {
 
             {/* Center: Spacer with workflow indicator - flex-1 keeps nav position stable */}
             <div className="flex-1 flex justify-center items-center">
-              {/* Workflow Step Indicator + Translation Progress */}
-              {isInProject && (workflowStatus || translationProgress) && (
-                <div className="flex items-center gap-3">
-                {/* Workflow Step Indicator */}
-                {workflowStatus && (
-                  <HeaderStepIndicator status={workflowStatus} onStepClick={handleStepClick} />
-                )}
-
-                {/* Translation Progress */}
-                {translationProgress && (
-                  <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/40 rounded-full border border-blue-200 dark:border-blue-700">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />
-                    <span className={`${fontClasses.xs} text-blue-700 dark:text-blue-300 font-medium`}>
-                      {t('translate.translationInProgress')}
-                    </span>
-                    <div className="w-20 h-1.5 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 dark:bg-blue-400 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.round(translationProgress.progress * 100)}%` }}
-                      />
-                    </div>
-                    <span className={`${fontClasses.xs} text-blue-600 dark:text-blue-400 min-w-[3rem] text-right`}>
-                      {Math.round(translationProgress.progress * 100)}%
-                    </span>
-                  </div>
-                )}
-                </div>
+              {/* Workflow Step Indicator */}
+              {isInProject && workflowStatus && (
+                <HeaderStepIndicator status={workflowStatus} onStepClick={handleStepClick} />
               )}
             </div>
 

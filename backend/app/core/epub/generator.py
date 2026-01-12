@@ -19,9 +19,10 @@ from app.models.database.paragraph import Paragraph
 class EPUBGenerator:
     """Generate bilingual EPUB from translated content."""
 
-    def __init__(self, project_id: str, db: AsyncSession):
+    def __init__(self, project_id: str, db: AsyncSession, output_dir: Optional[Path] = None):
         self.project_id = project_id
         self.db = db
+        self.output_dir = output_dir or settings.output_dir
 
     async def generate(self) -> Path:
         """Generate bilingual EPUB file."""
@@ -93,7 +94,8 @@ class EPUBGenerator:
         book.add_item(epub.EpubNav())
 
         # Write EPUB
-        output_path = settings.output_dir / f"{project.id}_bilingual.epub"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = self.output_dir / f"{project.id}_bilingual.epub"
         epub.write_epub(str(output_path), book)
 
         return output_path

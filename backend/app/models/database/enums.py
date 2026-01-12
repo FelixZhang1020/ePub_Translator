@@ -40,6 +40,7 @@ class ProofreadingStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class SuggestionStatus(str, Enum):

@@ -10,6 +10,7 @@ import { AnalysisPage } from './pages/workflow/AnalysisPage'
 import { TranslateWorkflowPage } from './pages/workflow/TranslateWorkflowPage'
 import { ProofreadPage } from './pages/workflow/ProofreadPage'
 import { ExportPage } from './pages/workflow/ExportPage'
+import { ParameterReviewPage } from './pages/workflow/ParameterReviewPage'
 import { useSettingsStore } from './stores/settingsStore'
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
             <Route path="translate" element={<TranslateWorkflowPage />} />
             <Route path="proofread" element={<ProofreadPage />} />
             <Route path="export" element={<ExportPage />} />
+            <Route path="parameters" element={<ParameterReviewPage />} />
           </Route>
 
           <Route path="/prompts" element={<PromptManagementPage />} />

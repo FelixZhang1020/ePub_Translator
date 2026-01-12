@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useParams, useOutletContext, useNavigate } from 'react-router-dom'
+import { useParams, useOutletContext, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload,
@@ -19,7 +19,10 @@ import {
   Search,
   RefreshCw,
   ArrowRight,
-  CheckCircle,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Lock,
+  Unlock,
 } from 'lucide-react'
 import { api, ChapterImage } from '../../services/api/client'
 import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appStore'
@@ -35,14 +38,10 @@ import {
   useChapterNavigation,
   usePanelResize,
 } from '../../utils/workflow'
+import type { Project } from '../../services/api/client'
 
 interface WorkflowContext {
-  project: {
-    id: string
-    name: string
-    author?: string | null
-    has_reference_epub?: boolean
-  } | null
+  project: Project | null
   workflowStatus: {
     has_reference_epub: boolean
     translation_completed: boolean
@@ -66,15 +65,17 @@ export function TranslateWorkflowPage() {
   const context = useOutletContext<WorkflowContext>()
   const fontSize = useAppStore((state) => state.fontSize)
   const fontClasses = fontSizeClasses[fontSize]
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Panel resize functionality from shared hook
   const { panelWidths, handleChapterListResize, handleReferencePanelResize } = usePanelResize()
 
-  // State
-  const [selectedChapter, setSelectedChapter] = useState<string | null>(null)
+  // State - initialize from URL params if available
+  const [selectedChapter, setSelectedChapter] = useState<string | null>(
+    searchParams.get('chapter') || null
+  )
   const [editingParagraph, setEditingParagraph] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const [confirmedParagraphs, setConfirmedParagraphs] = useState<Set<string>>(new Set())
   const [showReasoningChat, setShowReasoningChat] = useState<{
     translationId: string
     paragraphId: string
@@ -93,6 +94,9 @@ export function TranslateWorkflowPage() {
   const [refSearchInputValue, setRefSearchInputValue] = useState('')
   const [highlightedRefParagraph, setHighlightedRefParagraph] = useState<number | null>(null)
 
+  // Chapter list state
+  const [expandAllChapters, setExpandAllChapters] = useState(false)
+
   // LLM config from settings store
   const { getActiveConfig, getActiveConfigId } = useSettingsStore()
   const activeConfig = getActiveConfig()
@@ -107,7 +111,11 @@ export function TranslateWorkflowPage() {
   const isTranslating = translationProgress?.status === 'processing' || translationProgress?.status === 'pending'
   const translationStatus = translationProgress?.status
   const translationCompleted = context?.workflowStatus?.translation_completed ?? false
+  const translationDone = translationCompleted ||
+    translationStatus === 'completed' ||
+    (translationProgress?.progress ?? 0) >= 1
   const hasTranslationContent = (translationProgress?.completed_paragraphs ?? 0) > 0
+  const canConfirmTranslation = translationDone && hasTranslationContent && !isTranslating && !translationCompleted
 
   // Track previous translation status to detect completion
   const [prevTranslationStatus, setPrevTranslationStatus] = useState<string | undefined>(undefined)
@@ -136,63 +144,87 @@ export function TranslateWorkflowPage() {
   // Create ordered list of chapter IDs from TOC for navigation
   const orderedChapterIds = useOrderedChapterIds(toc, chapters)
 
+  // Create a map of chapter IDs to titles from TOC for looking up titles
+  const chapterTitleMap = useMemo(() => {
+    const map = new Map<string, string>()
+
+    const extractTitles = (items: typeof toc) => {
+      if (!items) return
+      for (const item of items) {
+        if (item.chapter_id && item.title) {
+          map.set(item.chapter_id, item.title)
+        }
+        if (item.children && item.children.length > 0) {
+          extractTitles(item.children)
+        }
+      }
+    }
+
+    extractTitles(toc)
+    return map
+  }, [toc])
+
+  // Wrapper function to update both state and URL params
+  const setSelectedChapterWithUrl = useCallback((chapterId: string) => {
+    setSelectedChapter(chapterId)
+    setSearchParams({ chapter: chapterId })
+  }, [setSearchParams])
+
   // Chapter navigation
   const { canGoPrev, canGoNext, goToPrevChapter, goToNextChapter } =
-    useChapterNavigation(orderedChapterIds, selectedChapter, setSelectedChapter)
+    useChapterNavigation(orderedChapterIds, selectedChapter, setSelectedChapterWithUrl)
 
   // Extract prompt preview variables from analysis data
   const promptPreviewVariables = useMemo(() => {
     const rawAnalysis = analysisData?.raw_analysis as Record<string, unknown> | null
 
-    // Project info from context - use actual project data, not analysis
-    const projectInfo = {
-      title: context?.project?.name || '',
-      author: context?.project?.author || '',
-      author_background: (rawAnalysis?.author_biography as string) || '',
-    }
-
-    if (!rawAnalysis) {
-      return {
-        project: projectInfo,
-        source_text: '(Source text will be provided during translation)',
-        analysis_text: '',
-        author_biography: '',
-        writing_style: '',
-        tone: '',
-        target_audience: '',
-        genre_conventions: '',
-        key_terminology: '',
-        translation_principles: '',
-        custom_guidelines: '',
-      }
-    }
-
     // Format key_terminology for display
-    const terminology = rawAnalysis.key_terminology as Record<string, string> | undefined
+    const terminology = rawAnalysis?.key_terminology as Array<{english_term: string, chinese_translation: string}> | undefined
     const terminologyText = terminology
-      ? Object.entries(terminology).map(([en, zh]) => `${en}: ${zh}`).join('\n')
+      ? terminology.map(t => `- ${t.english_term}: ${t.chinese_translation}`).join('\n')
       : ''
 
     // Format translation_principles for display
-    const principles = rawAnalysis.translation_principles as Record<string, unknown> | undefined
-    const principlesText = principles ? JSON.stringify(principles, null, 2) : ''
+    const principles = rawAnalysis?.translation_principles as Record<string, unknown> | undefined
+    const priorityOrder = principles?.priority_order as string | undefined || ''
+    const faithfulnessBoundary = principles?.faithfulness_boundary as string | undefined || ''
+    const permissibleAdaptation = principles?.permissible_adaptation as string | undefined || ''
+    const styleConstraints = principles?.style_constraints as string | undefined || ''
+    const redLines = principles?.red_lines as string | undefined || ''
 
     // Format custom_guidelines for display
-    const guidelines = rawAnalysis.custom_guidelines as string[] | undefined
+    const guidelines = rawAnalysis?.custom_guidelines as string[] | undefined
     const guidelinesText = guidelines ? guidelines.join('\n') : ''
 
     return {
-      project: projectInfo,
-      source_text: '(Source text will be provided during translation)',
-      analysis_text: JSON.stringify(rawAnalysis, null, 2),
-      author_biography: (rawAnalysis.author_biography as string) || '',
-      writing_style: (rawAnalysis.writing_style as string) || '',
-      tone: (rawAnalysis.tone as string) || '',
-      target_audience: (rawAnalysis.target_audience as string) || '',
-      genre_conventions: (rawAnalysis.genre_conventions as string) || '',
-      key_terminology: terminologyText,
-      translation_principles: principlesText,
-      custom_guidelines: guidelinesText,
+      // Project info (namespaced keys)
+      'project.title': context?.project?.epub_title || context?.project?.name || '',
+      'project.author': context?.project?.epub_author || '',
+      'project.author_background': context?.project?.author_background || '',
+      // Content
+      'content.source': '(Source text will be provided during translation)',
+      // Derived from analysis
+      'derived.writing_style': (rawAnalysis?.writing_style as string) || '',
+      'derived.tone': (rawAnalysis?.tone as string) || '',
+      'derived.target_audience': (rawAnalysis?.target_audience as string) || '',
+      'derived.genre_conventions': (rawAnalysis?.genre_conventions as string) || '',
+      'derived.terminology_table': terminologyText,
+      'derived.priority_order': priorityOrder,
+      'derived.faithfulness_boundary': faithfulnessBoundary,
+      'derived.permissible_adaptation': permissibleAdaptation,
+      'derived.style_constraints': styleConstraints,
+      'derived.red_lines': redLines,
+      'derived.custom_guidelines': guidelinesText,
+      // Boolean flags
+      'derived.has_analysis': !!rawAnalysis,
+      'derived.has_writing_style': !!(rawAnalysis?.writing_style),
+      'derived.has_tone': !!(rawAnalysis?.tone),
+      'derived.has_terminology': !!terminologyText,
+      'derived.has_target_audience': !!(rawAnalysis?.target_audience),
+      'derived.has_genre_conventions': !!(rawAnalysis?.genre_conventions),
+      'derived.has_translation_principles': !!principles,
+      'derived.has_custom_guidelines': !!(guidelines && guidelines.length > 0),
+      'derived.has_style_constraints': !!styleConstraints,
     }
   }, [analysisData, context?.project])
 
@@ -263,9 +295,9 @@ export function TranslateWorkflowPage() {
   // Select first chapter by default
   useEffect(() => {
     if (orderedChapterIds.length > 0 && !selectedChapter) {
-      setSelectedChapter(orderedChapterIds[0])
+      setSelectedChapterWithUrl(orderedChapterIds[0])
     }
-  }, [orderedChapterIds, selectedChapter])
+  }, [orderedChapterIds, selectedChapter, setSelectedChapterWithUrl])
 
   // Get paragraphs from chapter content
   const paragraphs = chapterContent?.paragraphs || []
@@ -314,7 +346,7 @@ export function TranslateWorkflowPage() {
       const currentChapterNumber = chapterContent?.chapter_number
       const currentChapterId = chapterContent?.id
       if (!currentChapterNumber || !currentChapterId) {
-        throw new Error('No chapter selected')
+        throw new Error(t('translate.noChapterSelected'))
       }
 
       // First, clear all existing translations for this chapter
@@ -352,8 +384,30 @@ export function TranslateWorkflowPage() {
   const confirmTranslationMutation = useMutation({
     mutationFn: () => api.confirmTranslation(projectId!),
     onSuccess: () => {
+      // Navigate immediately to proofreading stage
+      navigate(`/project/${projectId}/proofread`)
+      // Invalidate queries after navigation
       queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
       context?.refetchWorkflow()
+    },
+  })
+
+  // Cancel stuck tasks mutation
+  const cancelStuckTasksMutation = useMutation({
+    mutationFn: () => api.cancelStuckTasks(projectId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['chapter', projectId, selectedChapter] })
+      context?.refetchWorkflow()
+    },
+  })
+
+  // Lock/unlock translation mutation
+  const lockTranslationMutation = useMutation({
+    mutationFn: ({ paragraphId, isConfirmed }: { paragraphId: string; isConfirmed: boolean }) =>
+      api.lockTranslation(paragraphId, isConfirmed),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chapter', projectId, selectedChapter] })
     },
   })
 
@@ -410,19 +464,6 @@ export function TranslateWorkflowPage() {
   // Handle save
   const handleSave = (paragraphId: string) => {
     updateMutation.mutate({ paragraphId, text: editText })
-  }
-
-  // Toggle confirm status for a paragraph
-  const handleToggleConfirm = (paragraphId: string) => {
-    setConfirmedParagraphs((prev) => {
-      const next = new Set(prev)
-      if (next.has(paragraphId)) {
-        next.delete(paragraphId)
-      } else {
-        next.add(paragraphId)
-      }
-      return next
-    })
   }
 
   // Handle translation discussion - opens chat modal
@@ -518,6 +559,23 @@ export function TranslateWorkflowPage() {
             )}
             <span className="hidden sm:inline">{isTranslating ? t('translate.translating') : t('translate.translateCurrentChapter')}</span>
           </button>
+
+          {/* Cancel stuck tasks button - only show when translating */}
+          {isTranslating && (
+            <button
+              onClick={() => cancelStuckTasksMutation.mutate()}
+              disabled={cancelStuckTasksMutation.isPending}
+              className={`flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 ${fontClasses.button}`}
+              title={t('translate.cancelStuckTasks')}
+            >
+              {cancelStuckTasksMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <X className="w-4 h-4" />
+              )}
+              <span className="hidden lg:inline">{cancelStuckTasksMutation.isPending ? t('translate.cancelingTasks') : t('common.cancel')}</span>
+            </button>
+          )}
           <button
             onClick={() => setShowPreviewModal(true)}
             className={`flex items-center gap-2 px-2 lg:px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 ${fontClasses.button}`}
@@ -528,34 +586,31 @@ export function TranslateWorkflowPage() {
 
           {/* Complete Translation button */}
           <button
-            onClick={() => confirmTranslationMutation.mutate()}
-            disabled={!hasTranslationContent || confirmTranslationMutation.isPending || translationCompleted}
+            onClick={() => {
+              if (translationCompleted) {
+                // If already completed, just navigate to proofreading
+                navigate(`/project/${projectId}/proofread`)
+              } else {
+                // If not completed, confirm and navigate
+                confirmTranslationMutation.mutate()
+              }
+            }}
+            disabled={!translationCompleted && (!canConfirmTranslation || confirmTranslationMutation.isPending)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${fontClasses.button} ${
               translationCompleted
-                ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default'
+                ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                 : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed'
             }`}
           >
             {confirmTranslationMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : translationCompleted ? (
-              <CheckCircle className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" />
             ) : (
               <Check className="w-4 h-4" />
             )}
-            {translationCompleted ? t('translate.translationConfirmed') : t('translate.completeTranslation')}
+            {translationCompleted ? t('workflow.continueToProofreading') : t('translate.completeTranslation')}
           </button>
-
-          {/* Continue to Proofreading button - only shown after translation is confirmed */}
-          {translationCompleted && (
-            <button
-              onClick={() => navigate(`/project/${projectId}/proofread`)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${fontClasses.button}`}
-            >
-              {t('workflow.continueToProofreading')}
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -566,26 +621,45 @@ export function TranslateWorkflowPage() {
           style={{ width: panelWidths.chapterList }}
         >
           <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 h-full overflow-y-auto">
-            <h3 className={`font-medium text-gray-900 dark:text-gray-100 mb-1.5 ${fontClasses.sm}`}>{t('preview.chapterList')}</h3>
+            <div className="flex items-center justify-between mb-1.5">
+              <h3 className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>{t('preview.chapterList')}</h3>
+              {toc && toc.length > 0 && (
+                <button
+                  onClick={() => setExpandAllChapters(!expandAllChapters)}
+                  className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                  title={expandAllChapters ? t('preview.collapseAll') : t('preview.expandAll')}
+                >
+                  {expandAllChapters ? (
+                    <ChevronsDownUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronsUpDown className="w-4 h-4" />
+                  )}
+                </button>
+              )}
+            </div>
             {toc && toc.length > 0 ? (
               <TreeChapterList
                 toc={toc}
                 selectedChapterId={selectedChapter}
-                onSelectChapter={setSelectedChapter}
+                onSelectChapter={setSelectedChapterWithUrl}
                 fontClasses={fontClasses}
+                expandAll={expandAllChapters}
               />
             ) : chapters?.length ? (
               <div className="space-y-0.5">
                 {chapters.map((chapter) => (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedChapter(chapter.id)}
-                    className={`w-full text-left px-1.5 py-1 rounded ${fontClasses.paragraph} transition-colors ${
+                    onClick={() => setSelectedChapterWithUrl(chapter.id)}
+                    className={`relative w-full text-left px-1.5 py-1 rounded ${fontClasses.paragraph} transition-colors ${
                       selectedChapter === chapter.id
-                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-50 font-semibold'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                   >
+                    {selectedChapter === chapter.id && (
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l" />
+                    )}
                     <div className="font-medium truncate">
                       {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
                     </div>
@@ -621,7 +695,9 @@ export function TranslateWorkflowPage() {
               {t('preview.prevChapter')}
             </button>
             <span className="text-gray-600 dark:text-gray-300 font-medium text-xs">
-              {chapterContent?.title || t('preview.chapterNumber', { number: String(chapterContent?.chapter_number) })}
+              {chapterContent?.title ||
+               (chapterContent?.id ? chapterTitleMap.get(chapterContent.id) : null) ||
+               t('preview.chapterNumber', { number: String(chapterContent?.chapter_number) })}
             </span>
             <button
               onClick={goToNextChapter}
@@ -731,11 +807,12 @@ export function TranslateWorkflowPage() {
                         </button>
                       )}
 
-                      {/* Retranslate button */}
+                      {/* Retranslate button - disabled when locked */}
                       <button
                         onClick={() => retranslateMutation.mutate(para.id)}
-                        disabled={retranslateMutation.isPending}
-                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded text-[10px] disabled:opacity-50"
+                        disabled={retranslateMutation.isPending || para.is_confirmed}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={para.is_confirmed ? t('translate.unlockToEdit') : ''}
                       >
                         {retranslateMutation.isPending && retranslateMutation.variables === para.id ? (
                           <Loader2 className="w-2.5 h-2.5 animate-spin" />
@@ -747,26 +824,39 @@ export function TranslateWorkflowPage() {
                           : t('translate.retranslate')}
                       </button>
 
-                      {/* Edit button */}
+                      {/* Edit button - disabled when locked */}
                       <button
                         onClick={() => handleEdit(para.id, para.translated_text || '')}
-                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-[10px]"
+                        disabled={para.is_confirmed}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={para.is_confirmed ? t('translate.unlockToEdit') : ''}
                       >
                         <Edit2 className="w-2.5 h-2.5" />
                         {t('common.edit')}
                       </button>
 
-                      {/* Confirm toggle button */}
+                      {/* Lock/Unlock button */}
                       <button
-                        onClick={() => handleToggleConfirm(para.id)}
-                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${
-                          confirmedParagraphs.has(para.id)
-                            ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                        }`}
+                        onClick={() => lockTranslationMutation.mutate({
+                          paragraphId: para.id,
+                          isConfirmed: !para.is_confirmed
+                        })}
+                        disabled={lockTranslationMutation.isPending || !para.translated_text}
+                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                          para.is_confirmed
+                            ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400 hover:bg-orange-100 dark:hover:bg-orange-900/50 hover:text-orange-700 dark:hover:text-orange-400'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-green-100 dark:hover:bg-green-900/50 hover:text-green-700 dark:hover:text-green-400'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title={para.is_confirmed ? t('proofreading.unlock') : t('proofreading.confirm')}
                       >
-                        <Check className="w-2.5 h-2.5" />
-                        {confirmedParagraphs.has(para.id) ? t('translate.confirmed') : t('translate.pending')}
+                        {lockTranslationMutation.isPending ? (
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        ) : para.is_confirmed ? (
+                          <Lock className="w-2.5 h-2.5" />
+                        ) : (
+                          <Unlock className="w-2.5 h-2.5" />
+                        )}
+                        {para.is_confirmed ? t('translate.locked') : t('translate.unlocked')}
                       </button>
                     </div>
                   </div>
