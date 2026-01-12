@@ -18,8 +18,6 @@ import {
   Eye,
   MessageSquare,
   BookOpen,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Lock,
   Unlock,
   Sparkles,
@@ -30,8 +28,8 @@ import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appSt
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
 import { TreeChapterList } from '../../components/common/TreeChapterList'
+import { WorkflowChapterList } from '../../components/workflow/WorkflowChapterList'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
-import { ResizeHandle } from '../../components/common/ResizeHandle'
 import { PreviewModal } from '../../components/preview/PreviewModal'
 import {
   useOrderedChapterIds,
@@ -91,9 +89,6 @@ export function ProofreadPage() {
   )
   const [editingParagraph, setEditingParagraph] = useState<string | null>(null)
   const [editParagraphText, setEditParagraphText] = useState('')
-
-  // Chapter list state
-  const [expandAllChapters, setExpandAllChapters] = useState(false)
 
   // Keyboard navigation state
   const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState<number>(0)
@@ -468,7 +463,7 @@ export function ProofreadPage() {
       {/* Action Bar - unified format */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-3">
-          <h2 className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>{t('proofreading.title')}</h2>
+          <h2 className={`font-semibold text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>{t('workflow.proofreading')}</h2>
           {currentSession && (
             <span className={`${fontClasses.sm} text-gray-500 dark:text-gray-400`}>
               {t('proofreading.round')} {currentSession.round_number}
@@ -597,68 +592,15 @@ export function ProofreadPage() {
       <div className="flex flex-1 min-h-0">
         {/* Chapter list sidebar - only for all-translations view */}
         {viewMode === 'all-translations' && (
-          <>
-            <div
-              className="hidden lg:flex lg:flex-col flex-shrink-0"
-              style={{ width: panelWidths.chapterList }}
-            >
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 h-full overflow-y-auto">
-                <div className="flex items-center justify-between mb-1.5">
-                  <h3 className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>
-                    {t('preview.chapterList')}
-                  </h3>
-                  {toc && toc.length > 0 && (
-                    <button
-                      onClick={() => setExpandAllChapters(!expandAllChapters)}
-                      className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-                      title={expandAllChapters ? t('preview.collapseAll') : t('preview.expandAll')}
-                    >
-                      {expandAllChapters ? (
-                        <ChevronsDownUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronsUpDown className="w-4 h-4" />
-                      )}
-                    </button>
-                  )}
-                </div>
-                {toc && toc.length > 0 ? (
-                  <TreeChapterList
-                    toc={toc}
-                    selectedChapterId={selectedChapter}
-                    onSelectChapter={setSelectedChapterWithUrl}
-                    fontClasses={fontClasses}
-                    expandAll={expandAllChapters}
-                  />
-                ) : chapters?.length ? (
-                  <div className="space-y-0.5">
-                    {chapters.map((chapter) => (
-                      <button
-                        key={chapter.id}
-                        onClick={() => setSelectedChapterWithUrl(chapter.id)}
-                        className={`relative w-full text-left px-1.5 py-1 rounded ${fontClasses.paragraph} transition-colors ${selectedChapter === chapter.id
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-50 font-semibold'
-                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                          }`}
-                      >
-                        {selectedChapter === chapter.id && (
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l" />
-                        )}
-                        <div className="font-medium truncate">
-                          {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
-                        </div>
-                        <div className={`${fontClasses.xs} text-gray-400 dark:text-gray-500`}>
-                          {chapter.paragraph_count} {t('home.paragraphs')}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            <div className="hidden lg:flex h-full">
-              <ResizeHandle onResize={handleChapterListResize} className="h-full" />
-            </div>
-          </>
+          <WorkflowChapterList
+            width={panelWidths.chapterList}
+            toc={toc}
+            chapters={chapters}
+            selectedChapterId={selectedChapter}
+            onSelectChapter={setSelectedChapterWithUrl}
+            onResize={handleChapterListResize}
+            fontClasses={fontClasses}
+          />
         )}
 
         {/* Main content */}
@@ -841,258 +783,255 @@ export function ProofreadPage() {
                       (statusFilter === 'accepted' && s.is_confirmed)
                     )
                     .map((suggestion, index) => {
-                    const improvementLevel = suggestion.improvement_level || 'none'
-                    const isNoChange = improvementLevel === 'none'
+                      const improvementLevel = suggestion.improvement_level || 'none'
+                      const isNoChange = improvementLevel === 'none'
 
-                    return (
-                      <div
-                        key={suggestion.id}
-                        className={`bg-white dark:bg-gray-800 rounded-lg border p-3 transition-all ${isNoChange
-                          ? 'border-gray-300 dark:border-gray-600 opacity-75'
-                          : suggestion.is_confirmed
-                            ? 'border-green-200 dark:border-green-800'
-                            : focusedSuggestionIndex === index && statusFilter === 'pending'
-                              ? 'border-blue-400 dark:border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900'
-                              : 'border-gray-200 dark:border-gray-700'
-                          }`}
-                      >
-                        {/* Improvement level badge */}
-                        <div className="flex items-center justify-between mb-2">
-                          <div>
-                            {improvementLevel === 'critical' && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300`}>
-                                Critical
-                              </span>
-                            )}
-                            {improvementLevel === 'recommended' && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300`}>
-                                Recommended
-                              </span>
-                            )}
-                            {improvementLevel === 'optional' && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300`}>
-                                Optional
-                              </span>
-                            )}
-                            {improvementLevel === 'none' && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400`}>
-                                No Changes Needed
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Status badge based on lock status */}
-                          <span
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded ${fontClasses.xs} ${
-                              suggestion.is_confirmed
-                                ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
-                                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                      return (
+                        <div
+                          key={suggestion.id}
+                          className={`bg-white dark:bg-gray-800 rounded-lg border p-3 transition-all ${isNoChange
+                            ? 'border-gray-300 dark:border-gray-600 opacity-75'
+                            : suggestion.is_confirmed
+                              ? 'border-green-200 dark:border-green-800'
+                              : focusedSuggestionIndex === index && statusFilter === 'pending'
+                                ? 'border-blue-400 dark:border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900'
+                                : 'border-gray-200 dark:border-gray-700'
                             }`}
-                          >
-                            {suggestion.is_confirmed ? (
-                              <>
-                                <Lock className="w-3 h-3" />
-                                {t('proofreading.accepted')}
-                              </>
-                            ) : (
-                              <>
-                                <Unlock className="w-3 h-3" />
-                                {t('proofreading.pending')}
-                              </>
-                            )}
-                          </span>
-                        </div>
-
-                        {/* Original text */}
-                        <div className="mb-3">
-                          <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1`}>
-                            {t('proofreading.originalText')}
-                          </div>
-                          <div className={`text-gray-700 dark:text-gray-300 ${fontClasses.paragraph}`}>
-                            {suggestion.original_text}
-                          </div>
-                        </div>
-
-                        {/* Current translation - full width if no suggested translation */}
-                        <div className="mb-3">
-                          <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1 flex items-center justify-between`}>
-                            <span>{t('proofreading.currentTranslation')}</span>
-                            {/* Edit and Lock/Unlock buttons for current translation - hide during edit mode */}
-                            {editingCurrentTranslation !== suggestion.paragraph_id && (
-                              <div className="flex items-center gap-1">
-                                {!suggestion.is_confirmed && (
-                                  <button
-                                    onClick={() => {
-                                      setEditingCurrentTranslation(suggestion.paragraph_id)
-                                      setEditCurrentText(suggestion.current_translation || suggestion.original_translation)
-                                    }}
-                                    className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                                    title={t('common.edit')}
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => confirmTranslationMutation.mutate({
-                                    paragraphId: suggestion.paragraph_id,
-                                    isConfirmed: !suggestion.is_confirmed
-                                  })}
-                                  disabled={confirmTranslationMutation.isPending}
-                                  className={`p-1 rounded transition-colors ${
-                                    suggestion.is_confirmed
-                                      ? 'text-green-600 dark:text-green-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30'
-                                      : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                  }`}
-                                  title={suggestion.is_confirmed ? t('proofreading.unlock') : t('proofreading.confirm')}
-                                >
-                                  {confirmTranslationMutation.isPending ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : suggestion.is_confirmed ? (
-                                    <Lock className="w-3.5 h-3.5" />
-                                  ) : (
-                                    <Unlock className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          {editingCurrentTranslation === suggestion.paragraph_id ? (
+                        >
+                          {/* Improvement level badge */}
+                          <div className="flex items-center justify-between mb-2">
                             <div>
-                              <textarea
-                                value={editCurrentText}
-                                onChange={(e) => setEditCurrentText(e.target.value)}
-                                className={`w-full h-24 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded ${fontClasses.paragraph} bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500`}
-                              />
-                              <div className="flex gap-2 mt-2">
-                                <button
-                                  onClick={() => {
-                                    updateTranslationMutation.mutate({
-                                      paragraphId: suggestion.paragraph_id,
-                                      text: editCurrentText,
-                                    })
-                                  }}
-                                  disabled={updateTranslationMutation.isPending}
-                                  className={`flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 ${fontClasses.xs}`}
-                                >
-                                  {updateTranslationMutation.isPending ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    <Save className="w-3 h-3" />
-                                  )}
-                                  {t('common.save')}
-                                </button>
-                                <button
-                                  onClick={() => setEditingCurrentTranslation(null)}
-                                  className={`flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 ${fontClasses.xs}`}
-                                >
-                                  <X className="w-3 h-3" />
-                                  {t('common.cancel')}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className={`text-gray-600 dark:text-gray-400 ${fontClasses.paragraph} bg-gray-50 dark:bg-gray-900/50 p-2 rounded ${
-                              suggestion.is_confirmed ? 'border-l-4 border-green-500' : ''
-                            }`}>
-                              {suggestion.current_translation || suggestion.original_translation}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Suggested translation - only show if exists */}
-                        {suggestion.suggested_translation && (
-                          <div className="mb-3">
-                            <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1`}>
-                              {t('proofreading.suggestedTranslation')}
-                            </div>
-                            <div className={`text-blue-700 dark:text-blue-400 ${fontClasses.paragraph} bg-blue-50 dark:bg-blue-900/30 p-2 rounded`}>
-                              {suggestion.suggested_translation}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Explanation - more prominent for comment-only mode */}
-                        {suggestion.explanation && (
-                          <div className={`mt-3 ${fontClasses.sm} text-gray-600 dark:text-gray-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded`}>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-start gap-2 flex-1">
-                                <MessageSquare className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                                <div>
-                                  <span className="font-medium text-amber-800 dark:text-amber-300">{t('proofreading.feedback')}: </span>
-                                  <span className="text-gray-700 dark:text-gray-300">{suggestion.explanation}</span>
-                                </div>
-                              </div>
-                              {/* LLM Recommendation button */}
-                              {!suggestion.is_confirmed && !recommendations.has(suggestion.paragraph_id) && (
-                                <button
-                                  onClick={() => handleGetRecommendation(
-                                    suggestion.paragraph_id,
-                                    suggestion.original_text || '',
-                                    suggestion.current_translation || suggestion.original_translation,
-                                    suggestion.explanation || ''
-                                  )}
-                                  disabled={loadingRecommendation === suggestion.paragraph_id || !hasLLMConfig}
-                                  className={`flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 ${fontClasses.xs}`}
-                                  title={t('proofreading.getRecommendation')}
-                                >
-                                  {loadingRecommendation === suggestion.paragraph_id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                  )}
-                                  <span className="hidden sm:inline">{t('proofreading.askLLM')}</span>
-                                </button>
+                              {improvementLevel === 'critical' && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300`}>
+                                  Critical
+                                </span>
+                              )}
+                              {improvementLevel === 'recommended' && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300`}>
+                                  Recommended
+                                </span>
+                              )}
+                              {improvementLevel === 'optional' && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300`}>
+                                  Optional
+                                </span>
+                              )}
+                              {improvementLevel === 'none' && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400`}>
+                                  No Changes Needed
+                                </span>
                               )}
                             </div>
-                          </div>
-                        )}
 
-                        {/* LLM Recommendation - show if available */}
-                        {recommendations.has(suggestion.paragraph_id) && (
-                          <div className={`mt-3 ${fontClasses.sm} bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 p-3 rounded`}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                                <span className="font-medium text-purple-800 dark:text-purple-300">{t('proofreading.recommendedTranslation')}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => handleApplyRecommendation(suggestion.paragraph_id)}
-                                  disabled={updateTranslationMutation.isPending}
-                                  className={`flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 ${fontClasses.xs}`}
-                                  title={t('proofreading.applyRecommendation')}
-                                >
-                                  {updateTranslationMutation.isPending ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    <Check className="w-3 h-3" />
+                            {/* Status badge based on lock status */}
+                            <span
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded ${fontClasses.xs} ${suggestion.is_confirmed
+                                ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
+                                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                                }`}
+                            >
+                              {suggestion.is_confirmed ? (
+                                <>
+                                  <Lock className="w-3 h-3" />
+                                  {t('proofreading.accepted')}
+                                </>
+                              ) : (
+                                <>
+                                  <Unlock className="w-3 h-3" />
+                                  {t('proofreading.pending')}
+                                </>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Original text */}
+                          <div className="mb-3">
+                            <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1`}>
+                              {t('proofreading.originalText')}
+                            </div>
+                            <div className={`text-gray-700 dark:text-gray-300 ${fontClasses.paragraph}`}>
+                              {suggestion.original_text}
+                            </div>
+                          </div>
+
+                          {/* Current translation - full width if no suggested translation */}
+                          <div className="mb-3">
+                            <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1 flex items-center justify-between`}>
+                              <span>{t('proofreading.currentTranslation')}</span>
+                              {/* Edit and Lock/Unlock buttons for current translation - hide during edit mode */}
+                              {editingCurrentTranslation !== suggestion.paragraph_id && (
+                                <div className="flex items-center gap-1">
+                                  {!suggestion.is_confirmed && (
+                                    <button
+                                      onClick={() => {
+                                        setEditingCurrentTranslation(suggestion.paragraph_id)
+                                        setEditCurrentText(suggestion.current_translation || suggestion.original_translation)
+                                      }}
+                                      className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                      title={t('common.edit')}
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
                                   )}
-                                  {t('common.apply')}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setRecommendations(prev => {
-                                      const next = new Map(prev)
-                                      next.delete(suggestion.paragraph_id)
-                                      return next
-                                    })
-                                  }}
-                                  className={`flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 ${fontClasses.xs}`}
-                                >
-                                  <X className="w-3 h-3" />
-                                  {t('common.dismiss')}
-                                </button>
+                                  <button
+                                    onClick={() => confirmTranslationMutation.mutate({
+                                      paragraphId: suggestion.paragraph_id,
+                                      isConfirmed: !suggestion.is_confirmed
+                                    })}
+                                    disabled={confirmTranslationMutation.isPending}
+                                    className={`p-1 rounded transition-colors ${suggestion.is_confirmed
+                                      ? 'text-green-600 dark:text-green-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30'
+                                      : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                      }`}
+                                    title={suggestion.is_confirmed ? t('proofreading.unlock') : t('proofreading.confirm')}
+                                  >
+                                    {confirmTranslationMutation.isPending ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : suggestion.is_confirmed ? (
+                                      <Lock className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <Unlock className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            {editingCurrentTranslation === suggestion.paragraph_id ? (
+                              <div>
+                                <textarea
+                                  value={editCurrentText}
+                                  onChange={(e) => setEditCurrentText(e.target.value)}
+                                  className={`w-full h-24 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded ${fontClasses.paragraph} bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500`}
+                                />
+                                <div className="flex gap-2 mt-2">
+                                  <button
+                                    onClick={() => {
+                                      updateTranslationMutation.mutate({
+                                        paragraphId: suggestion.paragraph_id,
+                                        text: editCurrentText,
+                                      })
+                                    }}
+                                    disabled={updateTranslationMutation.isPending}
+                                    className={`flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 ${fontClasses.xs}`}
+                                  >
+                                    {updateTranslationMutation.isPending ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Save className="w-3 h-3" />
+                                    )}
+                                    {t('common.save')}
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingCurrentTranslation(null)}
+                                    className={`flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 ${fontClasses.xs}`}
+                                  >
+                                    <X className="w-3 h-3" />
+                                    {t('common.cancel')}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`text-gray-600 dark:text-gray-400 ${fontClasses.paragraph} bg-gray-50 dark:bg-gray-900/50 p-2 rounded ${suggestion.is_confirmed ? 'border-l-4 border-green-500' : ''
+                                }`}>
+                                {suggestion.current_translation || suggestion.original_translation}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Suggested translation - only show if exists */}
+                          {suggestion.suggested_translation && (
+                            <div className="mb-3">
+                              <div className={`${fontClasses.label} text-gray-400 dark:text-gray-500 uppercase mb-1`}>
+                                {t('proofreading.suggestedTranslation')}
+                              </div>
+                              <div className={`text-blue-700 dark:text-blue-400 ${fontClasses.paragraph} bg-blue-50 dark:bg-blue-900/30 p-2 rounded`}>
+                                {suggestion.suggested_translation}
                               </div>
                             </div>
-                            <div className={`text-purple-700 dark:text-purple-300 ${fontClasses.paragraph} bg-purple-100 dark:bg-purple-900/30 p-2 rounded`}>
-                              {recommendations.get(suggestion.paragraph_id)}
-                            </div>
-                          </div>
-                        )}
+                          )}
 
-                      </div>
-                    )
-                  })
+                          {/* Explanation - more prominent for comment-only mode */}
+                          {suggestion.explanation && (
+                            <div className={`mt-3 ${fontClasses.sm} text-gray-600 dark:text-gray-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-2 flex-1">
+                                  <MessageSquare className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                                  <div>
+                                    <span className="font-medium text-amber-800 dark:text-amber-300">{t('proofreading.feedback')}: </span>
+                                    <span className="text-gray-700 dark:text-gray-300">{suggestion.explanation}</span>
+                                  </div>
+                                </div>
+                                {/* LLM Recommendation button */}
+                                {!suggestion.is_confirmed && !recommendations.has(suggestion.paragraph_id) && (
+                                  <button
+                                    onClick={() => handleGetRecommendation(
+                                      suggestion.paragraph_id,
+                                      suggestion.original_text || '',
+                                      suggestion.current_translation || suggestion.original_translation,
+                                      suggestion.explanation || ''
+                                    )}
+                                    disabled={loadingRecommendation === suggestion.paragraph_id || !hasLLMConfig}
+                                    className={`flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 ${fontClasses.xs}`}
+                                    title={t('proofreading.getRecommendation')}
+                                  >
+                                    {loadingRecommendation === suggestion.paragraph_id ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="w-3.5 h-3.5" />
+                                    )}
+                                    <span className="hidden sm:inline">{t('proofreading.askLLM')}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* LLM Recommendation - show if available */}
+                          {recommendations.has(suggestion.paragraph_id) && (
+                            <div className={`mt-3 ${fontClasses.sm} bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 p-3 rounded`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                                  <span className="font-medium text-purple-800 dark:text-purple-300">{t('proofreading.recommendedTranslation')}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleApplyRecommendation(suggestion.paragraph_id)}
+                                    disabled={updateTranslationMutation.isPending}
+                                    className={`flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 ${fontClasses.xs}`}
+                                    title={t('proofreading.applyRecommendation')}
+                                  >
+                                    {updateTranslationMutation.isPending ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Check className="w-3 h-3" />
+                                    )}
+                                    {t('common.apply')}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setRecommendations(prev => {
+                                        const next = new Map(prev)
+                                        next.delete(suggestion.paragraph_id)
+                                        return next
+                                      })
+                                    }}
+                                    className={`flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 ${fontClasses.xs}`}
+                                  >
+                                    <X className="w-3 h-3" />
+                                    {t('common.dismiss')}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className={`text-purple-700 dark:text-purple-300 ${fontClasses.paragraph} bg-purple-100 dark:bg-purple-900/30 p-2 rounded`}>
+                                {recommendations.get(suggestion.paragraph_id)}
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      )
+                    })
                 )}
               </div>
             </div>

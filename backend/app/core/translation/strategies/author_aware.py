@@ -4,11 +4,15 @@ This module provides a context-rich translation strategy that incorporates
 book analysis, author background, and translation principles.
 """
 
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Dict
 
 from .base import PromptStrategy
-from ..models.context import TranslationContext, BookAnalysisContext
+from ..models.context import TranslationContext
 from ..models.prompt import Message, PromptBundle
+from app.core.prompts.loader import PromptLoader
+
+logger = logging.getLogger(__name__)
 
 
 class AuthorAwareStrategy(PromptStrategy):
@@ -20,69 +24,11 @@ class AuthorAwareStrategy(PromptStrategy):
     - Translation principles and red lines
     - Key terminology mappings
     - Adjacent paragraph context for coherence
+
+    Prompts are loaded from:
+    - backend/prompts/translation/system.default.md
+    - backend/prompts/translation/user.default.md
     """
-
-    # Base system prompt components
-    SYSTEM_BASE = """你是一位专业的文学翻译家，精通英文到中文的翻译。
-
-## 翻译要求
-1. 使用现代汉语表达，符合当代读者的阅读习惯
-2. 准确传达原文的含义和情感
-3. 人名地名等专有名词采用中国习惯的翻译方式
-4. 保持原作者的写作风格和语气
-5. 译文流畅自然，不生硬"""
-
-    # Section templates
-    AUTHOR_SECTION = """
-## 作者背景
-{author_biography}"""
-
-    STYLE_SECTION = """
-## 写作风格
-{writing_style}"""
-
-    TONE_SECTION = """
-## 语气特点
-{tone}"""
-
-    AUDIENCE_SECTION = """
-## 目标读者
-{target_audience}"""
-
-    PRINCIPLES_SECTION = """
-## 翻译原则
-- 优先级：{priority_order}
-- 忠实度边界：{faithfulness_boundary}
-- 允许的调整：{permissible_adaptation}
-- 风格约束：{style_constraints}"""
-
-    REDLINES_SECTION = """
-## 翻译红线（必须避免）
-{red_lines}"""
-
-    TERMINOLOGY_SECTION = """
-## 术语表（请保持一致）
-{terminology_list}"""
-
-    GUIDELINES_SECTION = """
-## 自定义要求
-{guidelines_list}"""
-
-    OUTPUT_SECTION = """
-## 输出要求
-直接输出翻译结果，不要添加任何解释或注释。"""
-
-    # User prompt with optional adjacent context
-    USER_WITH_CONTEXT = """[上文参考]
-原文：{prev_original}
-译文：{prev_translation}
-
-[请翻译以下段落]
-{source_text}"""
-
-    USER_SIMPLE = """请翻译以下英文：
-
-{source_text}"""
 
     def build(self, context: TranslationContext) -> PromptBundle:
         """Build prompt bundle with author-aware context.
@@ -95,11 +41,15 @@ class AuthorAwareStrategy(PromptStrategy):
         """
         variables = self.get_template_variables(context)
 
-        # Build system prompt from sections
-        system_prompt = self._build_system_prompt(context, variables)
-
-        # Build user prompt with optional adjacent context
-        user_prompt = self._build_user_prompt(context, variables)
+        # Load prompts from .md files
+        try:
+            template = PromptLoader.load_template("translation", "default")
+            system_prompt = PromptLoader.render(template.system_prompt, variables)
+            user_prompt = PromptLoader.render(template.user_prompt_template, variables)
+        except Exception as e:
+            logger.warning(f"Failed to load prompts from files: {e}. Using fallback.")
+            system_prompt = self._get_fallback_system_prompt(variables)
+            user_prompt = self._get_fallback_user_prompt(variables)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -125,161 +75,91 @@ class AuthorAwareStrategy(PromptStrategy):
             Dictionary with all variables used in prompts
         """
         variables: Dict[str, Any] = {
+            "content.source": context.source.text,
+            "content": {"source": context.source.text},
             "source_text": context.source.text,
             "target_language": context.target_language,
+            "project": {
+                "title": "",
+                "author": "",
+                "author_background": "",
+            },
+            "derived": {},
         }
 
         # Extract book analysis variables
         if context.book_analysis:
             ba = context.book_analysis
-            variables.update({
-                "author_biography": ba.author_biography,
+            variables["derived"].update({
                 "writing_style": ba.writing_style,
                 "tone": ba.tone,
                 "target_audience": ba.target_audience,
                 "genre_conventions": ba.genre_conventions,
+                "has_analysis": True,
             })
 
-            # Terminology as formatted list
+            # Terminology as formatted table
             if ba.key_terminology:
-                term_list = [
-                    f"- {en}: {zh}"
-                    for en, zh in ba.key_terminology.items()
-                ]
-                variables["terminology_list"] = "\n".join(term_list)
-                variables["key_terminology"] = ba.key_terminology
+                term_rows = [f"| {en} | {zh} |" for en, zh in ba.key_terminology.items()]
+                variables["derived"]["terminology_table"] = (
+                    "| English | Chinese |\n| --- | --- |\n" + "\n".join(term_rows)
+                )
+                variables["derived"]["has_terminology"] = True
 
             # Translation principles
             if ba.translation_principles:
                 tp = ba.translation_principles
-                variables.update({
-                    "priority_order": " > ".join(tp.priority_order),
+                variables["derived"].update({
+                    "priority_order": tp.priority_order,
                     "faithfulness_boundary": tp.faithfulness_boundary,
                     "permissible_adaptation": tp.permissible_adaptation,
                     "style_constraints": tp.style_constraints,
                     "red_lines": tp.red_lines,
+                    "has_translation_principles": bool(
+                        tp.faithfulness_boundary or tp.permissible_adaptation or tp.red_lines
+                    ),
                 })
 
-            # Custom guidelines as formatted list
+            # Custom guidelines
             if ba.custom_guidelines:
-                guidelines = [f"- {g}" for g in ba.custom_guidelines]
-                variables["guidelines_list"] = "\n".join(guidelines)
+                variables["derived"]["custom_guidelines"] = ba.custom_guidelines
+                variables["derived"]["has_custom_guidelines"] = True
 
         # Extract adjacent context
         if context.adjacent:
             adj = context.adjacent
             if adj.previous_original:
-                variables["prev_original"] = self._truncate_for_context(
+                variables["context.previous_source"] = self._truncate_for_context(
                     adj.previous_original
                 )
             if adj.previous_translation:
-                variables["prev_translation"] = self._truncate_for_context(
+                variables["context.previous_target"] = self._truncate_for_context(
                     adj.previous_translation
                 )
+            variables["context"] = {
+                "previous_source": variables.get("context.previous_source", ""),
+                "previous_target": variables.get("context.previous_target", ""),
+            }
 
         return variables
 
-    def _build_system_prompt(
-        self, context: TranslationContext, variables: Dict[str, Any]
-    ) -> str:
-        """Build system prompt from sections based on available data.
+    def _get_fallback_system_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback system prompt in English."""
+        return """You are a professional literary translator, specializing in English to Chinese translation.
 
-        Args:
-            context: Translation context
-            variables: Pre-extracted template variables
+## Translation Requirements
+1. Use modern Chinese expressions that suit contemporary readers
+2. Accurately convey the meaning and emotion of the original text
+3. Translate proper nouns according to Chinese conventions
+4. Maintain the author's writing style and tone
+5. Ensure the translation flows naturally
 
-        Returns:
-            Complete system prompt string
-        """
-        sections = [self.SYSTEM_BASE]
+## Output Requirements
+Output only the translation, without any explanation or commentary."""
 
-        # Add sections conditionally based on available data
-        if variables.get("author_biography"):
-            sections.append(
-                self.AUTHOR_SECTION.format(
-                    author_biography=variables["author_biography"]
-                )
-            )
+    def _get_fallback_user_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback user prompt in English."""
+        source = variables.get("source_text", variables.get("content.source", ""))
+        return f"""Please translate the following English text:
 
-        if variables.get("writing_style"):
-            sections.append(
-                self.STYLE_SECTION.format(writing_style=variables["writing_style"])
-            )
-
-        if variables.get("tone"):
-            sections.append(self.TONE_SECTION.format(tone=variables["tone"]))
-
-        if variables.get("target_audience"):
-            sections.append(
-                self.AUDIENCE_SECTION.format(
-                    target_audience=variables["target_audience"]
-                )
-            )
-
-        # Add translation principles if available
-        if (
-            context.book_analysis
-            and context.book_analysis.translation_principles
-        ):
-            tp = context.book_analysis.translation_principles
-            if any([tp.faithfulness_boundary, tp.permissible_adaptation, tp.style_constraints]):
-                sections.append(
-                    self.PRINCIPLES_SECTION.format(
-                        priority_order=variables.get("priority_order", "faithfulness > expressiveness > elegance"),
-                        faithfulness_boundary=variables.get("faithfulness_boundary", "N/A"),
-                        permissible_adaptation=variables.get("permissible_adaptation", "N/A"),
-                        style_constraints=variables.get("style_constraints", "N/A"),
-                    )
-                )
-
-            if tp.red_lines:
-                sections.append(
-                    self.REDLINES_SECTION.format(red_lines=variables["red_lines"])
-                )
-
-        # Add terminology section
-        if variables.get("terminology_list"):
-            sections.append(
-                self.TERMINOLOGY_SECTION.format(
-                    terminology_list=variables["terminology_list"]
-                )
-            )
-
-        # Add custom guidelines
-        if variables.get("guidelines_list"):
-            sections.append(
-                self.GUIDELINES_SECTION.format(
-                    guidelines_list=variables["guidelines_list"]
-                )
-            )
-
-        # Always add output section
-        sections.append(self.OUTPUT_SECTION)
-
-        return "\n".join(sections)
-
-    def _build_user_prompt(
-        self, context: TranslationContext, variables: Dict[str, Any]
-    ) -> str:
-        """Build user prompt with optional adjacent context.
-
-        Args:
-            context: Translation context
-            variables: Pre-extracted template variables
-
-        Returns:
-            User prompt string
-        """
-        # Include adjacent context if available
-        if (
-            context.adjacent
-            and context.adjacent.previous_original
-            and context.adjacent.previous_translation
-        ):
-            return self.USER_WITH_CONTEXT.format(
-                prev_original=variables["prev_original"],
-                prev_translation=variables["prev_translation"],
-                source_text=variables["source_text"],
-            )
-
-        return self.USER_SIMPLE.format(source_text=variables["source_text"])
+{source}"""

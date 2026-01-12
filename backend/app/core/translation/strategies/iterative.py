@@ -4,11 +4,15 @@ This module provides a multi-step translation strategy that first creates
 a literal translation, then refines it for naturalness.
 """
 
+import logging
 from typing import Any, Dict
 
 from .base import PromptStrategy
 from ..models.context import TranslationContext
 from ..models.prompt import Message, PromptBundle
+from app.core.prompts.loader import PromptLoader
+
+logger = logging.getLogger(__name__)
 
 
 class IterativeStrategy(PromptStrategy):
@@ -18,52 +22,12 @@ class IterativeStrategy(PromptStrategy):
     1. Step 1: Create a literal, accurate translation
     2. Step 2: Refine for naturalness while preserving meaning
 
+    Prompts are loaded from:
+    - Step 1: backend/prompts/translation/system.iterative-step1.md
+    - Step 2: backend/prompts/translation/system.iterative-step2.md
+
     Use get_step() to determine which step to build prompts for.
     """
-
-    # Step 1: Literal translation
-    STEP1_SYSTEM = """你是一位精确的翻译者。请创建一个直译版本，优先保证准确性。
-
-## 翻译要求
-1. 尽可能贴近原文的句式结构
-2. 确保每个概念都准确传达
-3. 暂时不必追求中文的优美流畅
-4. 专有名词按通用译法翻译
-
-## 输出格式
-<literal>
-你的直译内容
-</literal>"""
-
-    STEP1_USER = """请直译以下英文：
-
-{source_text}"""
-
-    # Step 2: Refinement
-    STEP2_SYSTEM = """你是一位中文润色专家。请基于提供的直译版本进行润色，使其成为优美流畅的中文。
-
-## 润色要求
-1. 在保持原意的前提下，调整为自然的中文表达
-2. 消除翻译腔，使用地道的中文用语
-3. 保持原文的语气和风格
-4. 确保专业术语准确
-
-{style_section}
-## 输出格式
-直接输出润色后的译文，不要添加任何解释。"""
-
-    STEP2_STYLE_SECTION = """## 风格参考
-- 写作风格：{writing_style}
-- 语气：{tone}
-"""
-
-    STEP2_USER = """原文（英文）：
-{source_text}
-
-直译版本：
-{literal_translation}
-
-请润色为自然流畅的中文："""
 
     def __init__(self, step: int = 1):
         """Initialize strategy for specific step.
@@ -97,17 +61,22 @@ class IterativeStrategy(PromptStrategy):
             Dictionary with variables for the current step
         """
         variables: Dict[str, Any] = {
+            "content.source": context.source.text,
+            "content": {"source": context.source.text},
             "source_text": context.source.text,
             "step": self.step,
+            "derived": {},
         }
 
         # For step 2, include literal translation
         if self.step == 2 and context.existing:
+            variables["content.target"] = context.existing.text
+            variables["content"]["target"] = context.existing.text
             variables["literal_translation"] = context.existing.text
 
         # Style information for step 2
         if context.book_analysis:
-            variables.update({
+            variables["derived"].update({
                 "writing_style": context.book_analysis.writing_style,
                 "tone": context.book_analysis.tone,
             })
@@ -125,8 +94,15 @@ class IterativeStrategy(PromptStrategy):
         """
         variables = self.get_template_variables(context)
 
-        system_prompt = self.STEP1_SYSTEM
-        user_prompt = self.STEP1_USER.format(source_text=variables["source_text"])
+        # Load prompts from .md files
+        try:
+            template = PromptLoader.load_template("translation", "iterative-step1")
+            system_prompt = PromptLoader.render(template.system_prompt, variables)
+            user_prompt = PromptLoader.render(template.user_prompt_template, variables)
+        except Exception as e:
+            logger.warning(f"Failed to load step1 prompts from files: {e}. Using fallback.")
+            system_prompt = self._get_fallback_step1_system()
+            user_prompt = self._get_fallback_step1_user(variables)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -161,19 +137,15 @@ class IterativeStrategy(PromptStrategy):
 
         variables = self.get_template_variables(context)
 
-        # Build style section if available
-        style_section = ""
-        if variables.get("writing_style") or variables.get("tone"):
-            style_section = self.STEP2_STYLE_SECTION.format(
-                writing_style=variables.get("writing_style", "N/A"),
-                tone=variables.get("tone", "N/A"),
-            )
-
-        system_prompt = self.STEP2_SYSTEM.format(style_section=style_section)
-        user_prompt = self.STEP2_USER.format(
-            source_text=variables["source_text"],
-            literal_translation=variables["literal_translation"],
-        )
+        # Load prompts from .md files
+        try:
+            template = PromptLoader.load_template("translation", "iterative-step2")
+            system_prompt = PromptLoader.render(template.system_prompt, variables)
+            user_prompt = PromptLoader.render(template.user_prompt_template, variables)
+        except Exception as e:
+            logger.warning(f"Failed to load step2 prompts from files: {e}. Using fallback.")
+            system_prompt = self._get_fallback_step2_system(variables)
+            user_prompt = self._get_fallback_step2_user(variables)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -188,3 +160,56 @@ class IterativeStrategy(PromptStrategy):
             estimated_input_tokens=self.estimate_tokens(system_prompt + user_prompt),
             template_variables=variables,
         )
+
+    def _get_fallback_step1_system(self) -> str:
+        """Get fallback system prompt for step 1."""
+        return """You are a precise translator. Create a literal translation that prioritizes accuracy.
+
+## Translation Requirements
+1. Stay as close as possible to the original sentence structure
+2. Ensure every concept is accurately conveyed
+3. Do not prioritize elegant Chinese at this stage
+4. Translate proper nouns according to common conventions
+
+## Output Format
+Output only the literal translation, without any explanation or commentary."""
+
+    def _get_fallback_step1_user(self, variables: Dict[str, Any]) -> str:
+        """Get fallback user prompt for step 1."""
+        source = variables.get("source_text", variables.get("content.source", ""))
+        return f"""Please create a literal translation of the following English text:
+
+{source}"""
+
+    def _get_fallback_step2_system(self, variables: Dict[str, Any]) -> str:
+        """Get fallback system prompt for step 2."""
+        style_section = ""
+        derived = variables.get("derived", {})
+        if derived.get("writing_style") or derived.get("tone"):
+            style_section = f"""
+## Style Reference
+**Writing Style**: {derived.get('writing_style', 'N/A')}
+**Tone**: {derived.get('tone', 'N/A')}
+"""
+        return f"""You are a Chinese language polishing expert. Based on the provided literal translation, refine it into elegant and fluent Chinese.
+
+## Polishing Requirements
+1. Adjust to natural Chinese expressions while preserving the original meaning
+2. Eliminate translation artifacts, use idiomatic Chinese
+3. Maintain the tone and style of the original text
+4. Ensure technical terms remain accurate
+{style_section}
+## Output Format
+Output only the polished translation, without any explanation."""
+
+    def _get_fallback_step2_user(self, variables: Dict[str, Any]) -> str:
+        """Get fallback user prompt for step 2."""
+        source = variables.get("source_text", variables.get("content.source", ""))
+        literal = variables.get("literal_translation", variables.get("content.target", ""))
+        return f"""**Original English**:
+{source}
+
+**Literal Translation**:
+{literal}
+
+Please polish into natural, fluent Chinese:"""

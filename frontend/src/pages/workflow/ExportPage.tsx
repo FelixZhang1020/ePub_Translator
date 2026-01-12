@@ -94,22 +94,87 @@ export function ExportPage() {
     return map
   }, [chapters])
 
-  // Fetch preview HTML - different behavior for EPUB vs HTML
+  // Fetch preview HTML - different behavior for ePub vs HTML
   const { data: previewData, isLoading: isLoadingPreview } = useQuery({
     queryKey: ['exportPreview', projectId, exportType, exportType === 'epub' ? previewChapter : 'all'],
-    queryFn: async () => {
-      if (exportType === 'epub' && previewChapter) {
-        // EPUB: fetch single chapter (page-by-page preview)
-        const response = await fetch(`/api/v1/export/${projectId}/preview?chapter_id=${previewChapter}`)
-        return response.json()
-      } else {
-        // HTML: fetch all chapters (continuous scroll preview)
-        const response = await fetch(`/api/v1/export/${projectId}/preview`)
-        return response.json()
-      }
+    queryFn: () => {
+      const chapterId = exportType === 'epub' ? previewChapter || undefined : undefined
+      return api.getExportPreview(projectId!, chapterId)
     },
     enabled: !!projectId && showPreview && (exportType === 'html' || !!previewChapter),
   })
+
+  const previewSrcDoc = useMemo(() => {
+    if (!previewData?.html) return null
+
+    let sanitizedHtml = previewData.html
+    if (exportFormat === 'translated' && typeof DOMParser !== 'undefined') {
+      try {
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(previewData.html, 'text/html')
+
+        // Remove untranslated paragraphs entirely (they have .untranslated class)
+        doc.querySelectorAll('.bilingual-pair.untranslated').forEach(pair => {
+          pair.remove()
+        })
+
+        // For translated pairs, remove original text and unwrap translated text
+        doc.querySelectorAll('.bilingual-pair').forEach(pair => {
+          const translated = pair.querySelector('.translated-text')
+
+          // Remove all original-text elements
+          pair.querySelectorAll('.original-text').forEach(el => el.remove())
+
+          // Unwrap the translated content from the bilingual-pair container
+          const parent = pair.parentElement
+          if (parent && translated) {
+            const fragment = doc.createDocumentFragment()
+            Array.from(translated.childNodes).forEach(child => fragment.appendChild(child.cloneNode(true)))
+            parent.insertBefore(fragment, pair.nextSibling)
+            parent.removeChild(pair)
+          }
+        })
+
+        sanitizedHtml = doc.body.innerHTML || previewData.html
+      } catch (err) {
+        console.warn('Failed to sanitize preview HTML', err)
+      }
+    }
+
+    const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+    const translatedClass = exportFormat === 'translated' ? 'preview-translated' : ''
+    const bodyClasses = [translatedClass, isDarkMode ? 'dark' : ''].filter(Boolean).join(' ')
+    const darkModeStyles = isDarkMode
+      ? `
+      .preview-wrapper { background-color: #111827; color: #e5e7eb; }
+      .preview-wrapper .original-text { color: #e5e7eb !important; }
+      .preview-wrapper .translated-text { color: #60a5fa !important; }
+      .preview-wrapper .bilingual-pair { border-bottom-color: #374151 !important; }
+      `
+      : ''
+
+    return `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: ${isDarkMode ? 'dark' : 'light'}; }
+      body { margin: 0; padding: 0; background: transparent; }
+      .preview-wrapper { box-sizing: border-box; padding: 16px; }
+      .preview-wrapper img, .preview-wrapper svg { max-width: 100%; height: auto; }
+      .preview-translated .original-text { display: none !important; }
+      ${darkModeStyles}
+    </style>
+  </head>
+  <body class="${bodyClasses}">
+    <div class="preview-wrapper">
+      ${sanitizedHtml}
+    </div>
+  </body>
+</html>
+    `
+  }, [exportFormat, previewData?.html])
 
   // Toggle chapter selection
   const toggleChapterSelection = useCallback((chapterId: string) => {
@@ -172,13 +237,17 @@ export function ExportPage() {
   const translationProgress = context?.workflowStatus?.translation_progress
   const completedParagraphs = translationProgress?.completed_paragraphs ?? 0
   const totalParagraphs = translationProgress?.total_paragraphs ?? context?.project?.total_paragraphs ?? 0
-  // If translation is completed, show 100%, otherwise use API's progress value (0-1 range)
-  const progressPercent = translationCompleted
-    ? 100
-    : Math.round((translationProgress?.progress ?? 0) * 100)
-  const isComplete = translationCompleted || progressPercent === 100
+  // If no paragraphs exist, show 0% and not complete
+  // Otherwise, if translation is completed, show 100%, else use API's progress value (0-1 range)
+  const hasContent = totalParagraphs > 0
+  const progressPercent = !hasContent
+    ? 0
+    : translationCompleted
+      ? 100
+      : Math.round((translationProgress?.progress ?? 0) * 100)
+  const isComplete = hasContent && (translationCompleted || progressPercent === 100)
 
-  // EPUB preview chapter navigation - only for selected chapters
+  // ePub preview chapter navigation - only for selected chapters
   const selectedChaptersList = chapters?.filter(ch => selectedChaptersForExport.has(ch.id)) ?? []
   const currentChapterIndex = selectedChaptersList.findIndex((c) => c.id === previewChapter)
   const canGoPrev = currentChapterIndex > 0
@@ -196,7 +265,7 @@ export function ExportPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-2 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
         {/* Left side: Title and status */}
         <div className="flex items-center gap-3">
-          <h2 className={`font-semibold text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>{t('export.title')}</h2>
+          <h2 className={`font-semibold text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>{t('workflow.export')}</h2>
           {isComplete ? (
             <span className={`flex items-center gap-1 px-2 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded ${fontClasses.sm}`}>
               <CheckCircle className="w-3.5 h-3.5" />
@@ -212,7 +281,7 @@ export function ExportPage() {
 
         {/* Right side: Switches and Download button */}
         <div className="flex items-center gap-4">
-          {/* Export Type Switch: EPUB / HTML */}
+          {/* Export Type Switch: ePub / HTML */}
           <div className="flex items-center gap-2">
             <span className={`text-gray-500 dark:text-gray-400 ${fontClasses.xs}`}>{t('export.exportType')}:</span>
             <div className="flex rounded-lg bg-gray-200 dark:bg-gray-700 p-0.5">
@@ -223,7 +292,7 @@ export function ExportPage() {
                   : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                   }`}
               >
-                EPUB
+                ePub
               </button>
               <button
                 onClick={() => setExportType('html')}
@@ -237,7 +306,7 @@ export function ExportPage() {
             </div>
           </div>
 
-          {/* Export Format Switch: Bilingual / Chinese Only (only for EPUB) */}
+          {/* Export Format Switch: Bilingual / Chinese Only (only for ePub) */}
           {exportType === 'epub' && (
             <div className="flex items-center gap-2">
               <span className={`text-gray-500 dark:text-gray-400 ${fontClasses.xs}`}>{t('export.format')}:</span>
@@ -354,7 +423,7 @@ export function ExportPage() {
       <div className="flex flex-1 min-h-0 overflow-x-auto">
         {/* Chapter list sidebar - resizable width */}
         <div
-          className="hidden lg:flex lg:flex-col flex-shrink-0"
+          className="hidden lg:flex lg:flex-col flex-shrink-0 self-stretch"
           style={{ width: panelWidths.chapterList }}
         >
           <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 h-full overflow-y-auto">
@@ -385,82 +454,84 @@ export function ExportPage() {
                 )}
               </div>
             </div>
-            {toc && toc.length > 0 ? (
-              <TreeChapterList
-                toc={toc}
-                selectedChapterId={null}
-                onSelectChapter={toggleChapterSelection}
-                fontClasses={fontClasses}
-                expandAll={expandAllChapters}
-                showCheckboxes={true}
-                selectedChapterIds={selectedChaptersForExport}
-                chapterStatsMap={chapterStatsMap}
-              />
-            ) : chapters?.length ? (
-              <div className="space-y-0.5">
-                {chapters.map((chapter) => (
-                  <label
-                    key={chapter.id}
-                    className={`flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${fontClasses.paragraph} text-gray-700 dark:text-gray-300`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedChaptersForExport.has(chapter.id)}
-                      onChange={() => toggleChapterSelection(chapter.id)}
-                      className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="truncate flex-1">
-                      {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
-                    </span>
-                    <span className={`${fontClasses.xs} text-gray-400 dark:text-gray-500`}>
-                      {chapter.confirmed_count} / {chapter.paragraph_count}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <div className={`text-gray-500 dark:text-gray-400 ${fontClasses.paragraph} text-center py-4`}>
-                {t('preview.noChapters')}
-              </div>
-            )}
+            <div>
+              {toc && toc.length > 0 ? (
+                <TreeChapterList
+                  toc={toc}
+                  selectedChapterId={null}
+                  onSelectChapter={toggleChapterSelection}
+                  fontClasses={fontClasses}
+                  expandAll={expandAllChapters}
+                  showCheckboxes={true}
+                  selectedChapterIds={selectedChaptersForExport}
+                  chapterStatsMap={chapterStatsMap}
+                />
+              ) : chapters?.length ? (
+                <div className="space-y-0.5">
+                  {chapters.map((chapter) => (
+                    <label
+                      key={chapter.id}
+                      className={`flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${fontClasses.paragraph} text-gray-700 dark:text-gray-300`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedChaptersForExport.has(chapter.id)}
+                        onChange={() => toggleChapterSelection(chapter.id)}
+                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="truncate flex-1">
+                        {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
+                      </span>
+                      <span className={`${fontClasses.xs} text-gray-400 dark:text-gray-500`}>
+                        {chapter.confirmed_count} / {chapter.paragraph_count}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className={`text-gray-500 dark:text-gray-400 ${fontClasses.paragraph} text-center py-4`}>
+                  {t('preview.noChapters')}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Resize handle for chapter list */}
-        <div className="hidden lg:flex h-full">
+        <div className="hidden lg:flex self-stretch">
           <ResizeHandle onResize={handleChapterListResize} className="h-full" />
         </div>
 
-        {/* Main content area - maintains minimum width */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-[500px]">
-          {/* Stats Row */}
+        {/* Main content area - overflow-hidden to contain preview content */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+          {/* Stats Row - flexbox with fixed widths for stability */}
           <div className="flex gap-4 mb-4">
-            {/* Project Info */}
-            <div className="flex-1 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-              <h3 className={`font-medium mb-3 flex items-center gap-2 ${fontClasses.sm}`}>
-                <BookOpen className="w-4 h-4" />
+            {/* Project Info - fills remaining space */}
+            <div className="flex-1 min-w-0 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+              <h3 className={`font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>
+                <BookOpen className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                 {t('export.projectInfo')}
               </h3>
               <div className={`grid grid-cols-3 gap-4 ${fontClasses.sm}`}>
                 <div>
                   <span className={`text-gray-500 dark:text-gray-400 block ${fontClasses.xs}`}>{t('export.bookTitle')}</span>
-                  <span className="font-medium">{context?.project?.name}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">{context?.project?.name}</span>
                 </div>
                 <div>
                   <span className={`text-gray-500 dark:text-gray-400 block ${fontClasses.xs}`}>{t('export.totalChapters')}</span>
-                  <span className="font-medium">{context?.project?.total_chapters}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{context?.project?.total_chapters}</span>
                 </div>
                 <div>
                   <span className={`text-gray-500 dark:text-gray-400 block ${fontClasses.xs}`}>{t('export.totalParagraphs')}</span>
-                  <span className="font-medium">{context?.project?.total_paragraphs}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{context?.project?.total_paragraphs}</span>
                 </div>
               </div>
             </div>
 
-            {/* Translation Status */}
-            <div className="w-64 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-              <h3 className={`font-medium mb-3 flex items-center gap-2 ${fontClasses.sm}`}>
-                <FileText className="w-4 h-4" />
+            {/* Translation Status - fixed width */}
+            <div className="w-64 flex-shrink-0 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+              <h3 className={`font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>
+                <FileText className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                 {t('export.translationStatus')}
               </h3>
               <div className="flex items-center gap-3">
@@ -472,7 +543,7 @@ export function ExportPage() {
                     />
                   </div>
                 </div>
-                <span className={`font-medium ${fontClasses.sm}`}>{progressPercent}%</span>
+                <span className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>{progressPercent}%</span>
               </div>
               <div className={`text-gray-400 dark:text-gray-500 mt-1 ${fontClasses.xs}`}>
                 {translationCompleted
@@ -486,9 +557,9 @@ export function ExportPage() {
           <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
             {showPreview ? (
               <>
-                {/* EPUB mode: Show chapter navigation for page-by-page preview */}
+                {/* ePub mode: Show chapter navigation for page-by-page preview */}
                 {exportType === 'epub' && (
-                  <div className="flex items-center gap-2 p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
+                  <div className="flex items-center gap-2 p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                     <button
                       onClick={() => {
                         if (canGoPrev) {
@@ -528,16 +599,18 @@ export function ExportPage() {
                   </div>
                 )}
 
-                {/* Preview content */}
-                <div className="flex-1 overflow-y-auto p-4">
+                {/* Preview content - constrained width with scroll */}
+                <div className="flex-1 overflow-hidden">
                   {isLoadingPreview ? (
-                    <div className="flex items-center justify-center py-12">
+                    <div className="flex items-center justify-center h-full">
                       <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                     </div>
-                  ) : previewData?.html ? (
-                    <div
-                      className="prose prose-sm max-w-none dark:prose-invert prose-img:max-h-64 prose-img:w-auto prose-img:mx-auto"
-                      dangerouslySetInnerHTML={{ __html: previewData.html }}
+                  ) : previewSrcDoc ? (
+                    <iframe
+                      title="Export preview"
+                      srcDoc={previewSrcDoc}
+                      className="w-full h-full border-0 bg-white dark:bg-gray-900"
+                      sandbox="allow-same-origin"
                     />
                   ) : (
                     <div className={`text-center py-12 text-gray-500 dark:text-gray-400 ${fontClasses.paragraph}`}>
@@ -549,8 +622,14 @@ export function ExportPage() {
             ) : (
               <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
                 <div className="text-center p-8">
-                  <p className={fontClasses.sm}>{t('export.selectChaptersHint')}</p>
-                  <p className={`mt-2 ${fontClasses.xs}`}>{t('export.clickToPreview')}</p>
+                  {orderedChapterIds.length > 0 ? (
+                    <>
+                      <p className={fontClasses.sm}>{t('export.selectChaptersHint')}</p>
+                      <p className={`mt-2 ${fontClasses.xs}`}>{t('export.clickToPreview')}</p>
+                    </>
+                  ) : (
+                    <p className={fontClasses.sm}>{t('export.noChaptersToExport')}</p>
+                  )}
                 </div>
               </div>
             )}

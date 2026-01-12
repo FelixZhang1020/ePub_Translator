@@ -1,7 +1,8 @@
 import axios from 'axios'
 
 const client = axios.create({
-  baseURL: '/api/v1',
+  // @ts-ignore
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
 })
 
 export interface Project {
@@ -175,7 +176,7 @@ export interface ResumePosition {
   current_step: string
 }
 
-// Reference EPUB types
+// Reference ePub types
 export interface ReferenceEPUB {
   id: string
   project_id: string
@@ -706,6 +707,17 @@ export const api = {
     return data
   },
 
+  async getExportPreview(projectId: string, chapterId?: string): Promise<{ html: string }> {
+    const params = new URLSearchParams()
+    if (chapterId) {
+      params.append('chapter_id', chapterId)
+    }
+    const queryString = params.toString()
+    const url = `/export/${projectId}/preview${queryString ? `?${queryString}` : ''}`
+    const { data } = await client.get(url)
+    return data
+  },
+
   // LLM Settings (New LiteLLM endpoints)
   async getProviders(): Promise<ProviderInfo[]> {
     const { data } = await client.get('/llm/providers')
@@ -932,7 +944,7 @@ export const api = {
     return data
   },
 
-  // Reference EPUB
+  // Reference ePub
   async uploadReferenceEpub(projectId: string, file: File): Promise<ReferenceEPUB> {
     const formData = new FormData()
     formData.append('file', file)

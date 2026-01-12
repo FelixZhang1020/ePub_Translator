@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.database.project import Project
 from app.models.database.book_analysis import BookAnalysis
 from app.core.prompts.loader import PromptLoader
+from app.utils.text import safe_truncate
 
 
 # =============================================================================
@@ -688,7 +689,7 @@ class VariableService:
             result["derived"].append({
                 "name": f"derived.{key}",
                 "description": desc,
-                "current_value": value if not isinstance(value, (dict, list)) else str(value)[:100],
+                "current_value": value if not isinstance(value, (dict, list)) else safe_truncate(str(value), 100),
                 "type": "boolean" if key.startswith("has_") else (
                     "object" if isinstance(value, (dict, list)) else "string"
                 ),
@@ -701,7 +702,7 @@ class VariableService:
                 result["user"].append({
                     "name": f"user.{key}",
                     "description": "User-defined variable",
-                    "current_value": value if not isinstance(value, (dict, list)) else str(value)[:100],
+                    "current_value": value if not isinstance(value, (dict, list)) else safe_truncate(str(value), 100),
                     "editable": True,
                     "stages": ["analysis", "translation", "optimization", "proofreading"],
                 })
@@ -711,7 +712,7 @@ class VariableService:
             result["macros"].append({
                 "name": f"@{name}",
                 "description": f"Macro: expands to template",
-                "template": template[:100] + "..." if len(template) > 100 else template,
+                "template": safe_truncate(template, 100) if len(template) > 100 else template,
                 "stages": ["analysis", "translation", "optimization", "proofreading"],
             })
 

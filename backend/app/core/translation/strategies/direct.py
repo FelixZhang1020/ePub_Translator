@@ -4,11 +4,15 @@ This module provides a simple, direct translation strategy without
 extensive context or author-aware features.
 """
 
+import logging
 from typing import Any, Dict
 
 from .base import PromptStrategy
 from ..models.context import TranslationContext
 from ..models.prompt import Message, PromptBundle
+from app.core.prompts.loader import PromptLoader
+
+logger = logging.getLogger(__name__)
 
 
 class DirectTranslationStrategy(PromptStrategy):
@@ -17,28 +21,15 @@ class DirectTranslationStrategy(PromptStrategy):
     This strategy provides basic translation with minimal context.
     Suitable for straightforward translation tasks without specific
     author style requirements.
+
+    Prompts are loaded from:
+    - backend/prompts/translation/system.default.md
+    - backend/prompts/translation/user.default.md
     """
-
-    # System prompt template - kept in Chinese as per project spec
-    # (prompt content is allowed to be in Chinese)
-    SYSTEM_TEMPLATE = """你是一位专业的翻译，精通英文到{target_language_name}的翻译。
-
-## 翻译要求
-1. 准确传达原文的含义和情感
-2. 使用自然、流畅的{target_language_name}表达
-3. 保持原文的格式和段落结构
-4. 专有名词采用通用译法
-
-## 输出要求
-直接输出翻译结果，不要添加任何解释或注释。"""
-
-    USER_TEMPLATE = """请翻译以下英文：
-
-{source_text}"""
 
     # Language name mapping
     LANGUAGE_NAMES = {
-        "zh": "中文",
+        "zh": "Chinese",
         "en": "English",
         "ja": "Japanese",
         "ko": "Korean",
@@ -55,11 +46,15 @@ class DirectTranslationStrategy(PromptStrategy):
         """
         variables = self.get_template_variables(context)
 
-        # Build system prompt
-        system_prompt = self.SYSTEM_TEMPLATE.format(**variables)
-
-        # Build user prompt
-        user_prompt = self.USER_TEMPLATE.format(**variables)
+        # Load prompts from .md files
+        try:
+            template = PromptLoader.load_template("translation", "default")
+            system_prompt = PromptLoader.render(template.system_prompt, variables)
+            user_prompt = PromptLoader.render(template.user_prompt_template, variables)
+        except Exception as e:
+            logger.warning(f"Failed to load prompts from files: {e}. Using fallback.")
+            system_prompt = self._get_fallback_system_prompt(variables)
+            user_prompt = self._get_fallback_user_prompt(variables)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -82,14 +77,39 @@ class DirectTranslationStrategy(PromptStrategy):
             context: Translation context
 
         Returns:
-            Dictionary with source_text and target_language_name
+            Dictionary with variables for template rendering
         """
         target_lang_name = self.LANGUAGE_NAMES.get(
             context.target_language, context.target_language
         )
 
         return {
+            "content.source": context.source.text,
+            "content": {"source": context.source.text},
             "source_text": context.source.text,
             "target_language": context.target_language,
             "target_language_name": target_lang_name,
+            "project": {
+                "title": "",
+                "author": "",
+            },
         }
+
+    def _get_fallback_system_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback system prompt in English."""
+        return f"""You are a professional translator, fluent in English to {variables.get('target_language_name', 'Chinese')} translation.
+
+## Translation Requirements
+1. Accurately convey the meaning and emotion of the original text
+2. Use natural, fluent {variables.get('target_language_name', 'Chinese')} expressions
+3. Preserve the format and paragraph structure of the original
+4. Use common translations for proper nouns
+
+## Output Requirements
+Output only the translation, without any explanation or commentary."""
+
+    def _get_fallback_user_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback user prompt in English."""
+        return f"""Please translate the following English text:
+
+{variables.get('source_text', variables.get('content.source', ''))}"""

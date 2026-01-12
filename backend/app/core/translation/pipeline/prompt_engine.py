@@ -15,6 +15,7 @@ from ..strategies import (
     OptimizationStrategy,
     IterativeStrategy,
 )
+from app.utils.text import safe_truncate
 
 
 class PromptEngine:
@@ -123,8 +124,9 @@ class PromptEngine:
         variable_info = {}
         for name, value in variables.items():
             if value is not None and value != "":
+                str_value = str(value)
                 variable_info[name] = {
-                    "value": str(value)[:200] + "..." if len(str(value)) > 200 else str(value),
+                    "value": safe_truncate(str_value, 200) if len(str_value) > 200 else str_value,
                     "type": type(value).__name__,
                     "used_in": [],
                 }

@@ -4,11 +4,15 @@ This module provides a strategy for improving existing translations,
 making them more natural and modern while preserving meaning.
 """
 
+import logging
 from typing import Any, Dict
 
 from .base import PromptStrategy
 from ..models.context import TranslationContext
 from ..models.prompt import Message, PromptBundle
+from app.core.prompts.loader import PromptLoader
+
+logger = logging.getLogger(__name__)
 
 
 class OptimizationStrategy(PromptStrategy):
@@ -19,38 +23,11 @@ class OptimizationStrategy(PromptStrategy):
     - Updated expressions for modern Chinese
     - Improved fluency and readability
     - Preserved original meaning and author style
+
+    Prompts are loaded from:
+    - backend/prompts/optimization/system.default.md
+    - backend/prompts/optimization/user.default.md
     """
-
-    SYSTEM_TEMPLATE = """你是一位中文语言优化专家。你的任务是优化已有的中文翻译，使其更符合现代汉语表达习惯。
-
-## 优化要求
-1. 更新过时或生僻的表达方式
-2. 使用当代常用词汇
-3. 提高句子的流畅性和可读性
-4. 保持原文含义的准确性
-5. 保留原作者的语气和风格
-
-{style_section}
-{terminology_section}
-## 输出格式
-直接输出优化后的翻译，不要添加任何解释。"""
-
-    STYLE_SECTION = """## 风格参考
-- 写作风格：{writing_style}
-- 语气：{tone}
-"""
-
-    TERMINOLOGY_SECTION = """## 术语一致性（请保持以下译法）
-{terminology_list}
-"""
-
-    USER_TEMPLATE = """原文（英文）：
-{source_text}
-
-现有翻译（待优化）：
-{existing_translation}
-
-请优化上述翻译："""
 
     def build(self, context: TranslationContext) -> PromptBundle:
         """Build prompt bundle for translation optimization.
@@ -69,11 +46,15 @@ class OptimizationStrategy(PromptStrategy):
 
         variables = self.get_template_variables(context)
 
-        # Build system prompt with optional sections
-        system_prompt = self._build_system_prompt(context, variables)
-
-        # Build user prompt
-        user_prompt = self.USER_TEMPLATE.format(**variables)
+        # Load prompts from .md files
+        try:
+            template = PromptLoader.load_template("optimization", "default")
+            system_prompt = PromptLoader.render(template.system_prompt, variables)
+            user_prompt = PromptLoader.render(template.user_prompt_template, variables)
+        except Exception as e:
+            logger.warning(f"Failed to load prompts from files: {e}. Using fallback.")
+            system_prompt = self._get_fallback_system_prompt(variables)
+            user_prompt = self._get_fallback_user_prompt(variables)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -99,57 +80,58 @@ class OptimizationStrategy(PromptStrategy):
             Dictionary with source text, existing translation, and style info
         """
         variables: Dict[str, Any] = {
+            "content.source": context.source.text,
+            "content.target": context.existing.text if context.existing else "",
+            "content": {
+                "source": context.source.text,
+                "target": context.existing.text if context.existing else "",
+            },
             "source_text": context.source.text,
             "existing_translation": context.existing.text if context.existing else "",
+            "derived": {},
         }
 
         # Extract style information if available
         if context.book_analysis:
             ba = context.book_analysis
-            variables.update({
+            variables["derived"].update({
                 "writing_style": ba.writing_style,
                 "tone": ba.tone,
+                "has_analysis": True,
             })
 
             # Terminology list
             if ba.key_terminology:
-                term_list = [
-                    f"- {en}: {zh}"
-                    for en, zh in ba.key_terminology.items()
-                ]
-                variables["terminology_list"] = "\n".join(term_list)
+                term_rows = [f"| {en} | {zh} |" for en, zh in ba.key_terminology.items()]
+                variables["derived"]["terminology_table"] = (
+                    "| English | Chinese |\n| --- | --- |\n" + "\n".join(term_rows)
+                )
+                variables["derived"]["has_terminology"] = True
 
         return variables
 
-    def _build_system_prompt(
-        self, context: TranslationContext, variables: Dict[str, Any]
-    ) -> str:
-        """Build system prompt with conditional sections.
+    def _get_fallback_system_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback system prompt in English."""
+        return """You are a Chinese language optimization expert. Your task is to improve existing Chinese translations to better conform to modern Chinese expression conventions.
 
-        Args:
-            context: Translation context
-            variables: Pre-extracted variables
+## Optimization Requirements
+1. Update outdated or obscure expressions
+2. Use contemporary common vocabulary
+3. Improve sentence fluency and readability
+4. Maintain accuracy of the original meaning
+5. Preserve the original author's tone and style
 
-        Returns:
-            System prompt string
-        """
-        style_section = ""
-        terminology_section = ""
+## Output Format
+Output only the optimized translation, without any explanation."""
 
-        # Add style section if available
-        if variables.get("writing_style") or variables.get("tone"):
-            style_section = self.STYLE_SECTION.format(
-                writing_style=variables.get("writing_style", "N/A"),
-                tone=variables.get("tone", "N/A"),
-            )
+    def _get_fallback_user_prompt(self, variables: Dict[str, Any]) -> str:
+        """Get fallback user prompt in English."""
+        source = variables.get("source_text", variables.get("content.source", ""))
+        existing = variables.get("existing_translation", variables.get("content.target", ""))
+        return f"""Original text (English):
+{source}
 
-        # Add terminology section if available
-        if variables.get("terminology_list"):
-            terminology_section = self.TERMINOLOGY_SECTION.format(
-                terminology_list=variables["terminology_list"]
-            )
+Existing translation (to be optimized):
+{existing}
 
-        return self.SYSTEM_TEMPLATE.format(
-            style_section=style_section,
-            terminology_section=terminology_section,
-        )
+Please optimize the above translation:"""

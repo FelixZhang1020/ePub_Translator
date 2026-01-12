@@ -16,11 +16,8 @@ import {
   FileText,
   BookOpen,
   PanelRightClose,
-  Search,
   RefreshCw,
   ArrowRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Lock,
   Unlock,
 } from 'lucide-react'
@@ -28,9 +25,9 @@ import { api, ChapterImage } from '../../services/api/client'
 import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
-import { TreeChapterList } from '../../components/common/TreeChapterList'
+import { WorkflowChapterList } from '../../components/workflow/WorkflowChapterList'
+import { ReferencePanel } from '../../components/workflow/ReferencePanel'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
-import { ResizeHandle } from '../../components/common/ResizeHandle'
 import { PreviewModal } from '../../components/preview/PreviewModal'
 import { ReasoningChatModal } from '../../components/translation/ReasoningChatModal'
 import {
@@ -93,9 +90,6 @@ export function TranslateWorkflowPage() {
   const [refSearchQuery, setRefSearchQuery] = useState('')
   const [refSearchInputValue, setRefSearchInputValue] = useState('')
   const [highlightedRefParagraph, setHighlightedRefParagraph] = useState<number | null>(null)
-
-  // Chapter list state
-  const [expandAllChapters, setExpandAllChapters] = useState(false)
 
   // LLM config from settings store
   const { getActiveConfig, getActiveConfigId } = useSettingsStore()
@@ -179,7 +173,7 @@ export function TranslateWorkflowPage() {
     const rawAnalysis = analysisData?.raw_analysis as Record<string, unknown> | null
 
     // Format key_terminology for display
-    const terminology = rawAnalysis?.key_terminology as Array<{english_term: string, chinese_translation: string}> | undefined
+    const terminology = rawAnalysis?.key_terminology as Array<{ english_term: string, chinese_translation: string }> | undefined
     const terminologyText = terminology
       ? terminology.map(t => `- ${t.english_term}: ${t.chinese_translation}`).join('\n')
       : ''
@@ -280,7 +274,7 @@ export function TranslateWorkflowPage() {
     if (prevTranslationStatus && translationStatus !== prevTranslationStatus) {
       // Status changed - check if translation just completed
       if ((prevTranslationStatus === 'processing' || prevTranslationStatus === 'pending') &&
-          translationStatus === 'completed') {
+        translationStatus === 'completed') {
         // Translation just completed - do a final refetch after a short delay
         // to ensure all final commits are persisted
         const timer = setTimeout(() => {
@@ -482,6 +476,11 @@ export function TranslateWorkflowPage() {
       {/* Action Bar - unified format */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2 bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2 lg:gap-4">
+          {/* Page title */}
+          <h2 className={`font-semibold text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>
+            {t('workflow.translation')}
+          </h2>
+
           {/* Reference EPUB status */}
           {hasReference && referenceEpub ? (
             <div className={`flex items-center gap-2 ${fontClasses.base}`}>
@@ -500,11 +499,10 @@ export function TranslateWorkflowPage() {
               </button>
               <button
                 onClick={() => setShowReferencePanel(!showReferencePanel)}
-                className={`flex items-center gap-2 px-2 lg:px-3 py-1.5 border rounded-lg flex-shrink-0 transition-colors ${
-                  showReferencePanel
-                    ? 'border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                    : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                } ${fontClasses.button}`}
+                className={`flex items-center gap-2 px-2 lg:px-3 py-1.5 border rounded-lg flex-shrink-0 transition-colors ${showReferencePanel
+                  ? 'border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  } ${fontClasses.button}`}
                 title={showReferencePanel ? t('translate.hideReferencePanel') : t('translate.showReferencePanel')}
               >
                 {showReferencePanel ? <PanelRightClose className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
@@ -596,11 +594,10 @@ export function TranslateWorkflowPage() {
               }
             }}
             disabled={!translationCompleted && (!canConfirmTranslation || confirmTranslationMutation.isPending)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${fontClasses.button} ${
-              translationCompleted
-                ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed'
-            }`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${fontClasses.button} ${translationCompleted
+              ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+              : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed'
+              }`}
           >
             {confirmTranslationMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -616,71 +613,15 @@ export function TranslateWorkflowPage() {
 
       <div className="flex flex-1 min-h-0 overflow-x-auto">
         {/* Chapter list sidebar - resizable width */}
-        <div
-          className="hidden lg:flex lg:flex-col flex-shrink-0"
-          style={{ width: panelWidths.chapterList }}
-        >
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 h-full overflow-y-auto">
-            <div className="flex items-center justify-between mb-1.5">
-              <h3 className={`font-medium text-gray-900 dark:text-gray-100 ${fontClasses.sm}`}>{t('preview.chapterList')}</h3>
-              {toc && toc.length > 0 && (
-                <button
-                  onClick={() => setExpandAllChapters(!expandAllChapters)}
-                  className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-                  title={expandAllChapters ? t('preview.collapseAll') : t('preview.expandAll')}
-                >
-                  {expandAllChapters ? (
-                    <ChevronsDownUp className="w-4 h-4" />
-                  ) : (
-                    <ChevronsUpDown className="w-4 h-4" />
-                  )}
-                </button>
-              )}
-            </div>
-            {toc && toc.length > 0 ? (
-              <TreeChapterList
-                toc={toc}
-                selectedChapterId={selectedChapter}
-                onSelectChapter={setSelectedChapterWithUrl}
-                fontClasses={fontClasses}
-                expandAll={expandAllChapters}
-              />
-            ) : chapters?.length ? (
-              <div className="space-y-0.5">
-                {chapters.map((chapter) => (
-                  <button
-                    key={chapter.id}
-                    onClick={() => setSelectedChapterWithUrl(chapter.id)}
-                    className={`relative w-full text-left px-1.5 py-1 rounded ${fontClasses.paragraph} transition-colors ${
-                      selectedChapter === chapter.id
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-50 font-semibold'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
-                  >
-                    {selectedChapter === chapter.id && (
-                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l" />
-                    )}
-                    <div className="font-medium truncate">
-                      {chapter.title || t('preview.chapterNumber', { number: String(chapter.chapter_number) })}
-                    </div>
-                    <div className={`${fontClasses.xs} text-gray-400 dark:text-gray-500`}>
-                      {chapter.paragraph_count} {t('home.paragraphs')}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className={`text-gray-500 dark:text-gray-400 ${fontClasses.paragraph} text-center py-4`}>
-                {t('preview.noChapters')}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Resize handle for chapter list */}
-        <div className="hidden lg:flex h-full">
-          <ResizeHandle onResize={handleChapterListResize} className="h-full" />
-        </div>
+        <WorkflowChapterList
+          width={panelWidths.chapterList}
+          toc={toc}
+          chapters={chapters}
+          selectedChapterId={selectedChapter}
+          onSelectChapter={setSelectedChapterWithUrl}
+          onResize={handleChapterListResize}
+          fontClasses={fontClasses}
+        />
 
         {/* Main content area - maintains minimum width */}
         <div className="flex-1 flex flex-col min-h-0 min-w-[500px]">
@@ -696,8 +637,8 @@ export function TranslateWorkflowPage() {
             </button>
             <span className="text-gray-600 dark:text-gray-300 font-medium text-xs">
               {chapterContent?.title ||
-               (chapterContent?.id ? chapterTitleMap.get(chapterContent.id) : null) ||
-               t('preview.chapterNumber', { number: String(chapterContent?.chapter_number) })}
+                (chapterContent?.id ? chapterTitleMap.get(chapterContent.id) : null) ||
+                (chapterContent?.chapter_number ? t('preview.chapterNumber', { number: String(chapterContent.chapter_number) }) : t('translate.noChapterSelected'))}
             </span>
             <button
               onClick={goToNextChapter}
@@ -842,11 +783,10 @@ export function TranslateWorkflowPage() {
                           isConfirmed: !para.is_confirmed
                         })}
                         disabled={lockTranslationMutation.isPending || !para.translated_text}
-                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                          para.is_confirmed
-                            ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400 hover:bg-orange-100 dark:hover:bg-orange-900/50 hover:text-orange-700 dark:hover:text-orange-400'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-green-100 dark:hover:bg-green-900/50 hover:text-green-700 dark:hover:text-green-400'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] transition-colors ${para.is_confirmed
+                          ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400 hover:bg-orange-100 dark:hover:bg-orange-900/50 hover:text-orange-700 dark:hover:text-orange-400'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-green-100 dark:hover:bg-green-900/50 hover:text-green-700 dark:hover:text-green-400'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                         title={para.is_confirmed ? t('proofreading.unlock') : t('proofreading.confirm')}
                       >
                         {lockTranslationMutation.isPending ? (
@@ -866,146 +806,33 @@ export function TranslateWorkflowPage() {
           </div>
         </div>
 
-        {/* Resize handle for reference panel */}
-        {showReferencePanel && hasReference && (
-          <ResizeHandle onResize={handleReferencePanelResize} className="h-full" />
-        )}
+        {/* Reference Panel */}
+        <ReferencePanel
+          width={panelWidths.referencePanel}
+          show={showReferencePanel}
+          hasReference={hasReference}
+          onClose={() => setShowReferencePanel(false)}
+          onResize={handleReferencePanelResize}
 
-        {/* Reference Panel - Fixed position, doesn't scroll with main content */}
-        {showReferencePanel && hasReference && (
-          <div
-            className="flex-shrink-0 self-start sticky top-2"
-            style={{ width: panelWidths.referencePanel }}
-          >
-            <div className="bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800 p-2 max-h-[calc(100vh-100px)] flex flex-col">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-medium text-amber-800 dark:text-amber-200 text-xs flex items-center gap-1">
-                  <BookOpen className="w-3 h-3" />
-                  {t('translate.referenceChapter')}
-                </h3>
-                <button
-                  onClick={() => setShowReferencePanel(false)}
-                  className="p-0.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          searchQuery={refSearchQuery}
+          searchInputValue={refSearchInputValue}
+          isSearching={isSearchingRef}
+          onSearch={handleRefSearch}
+          onSearchInputChange={setRefSearchInputValue}
+          onClearSearch={handleClearRefSearch}
+          searchResults={searchResults}
+          onSearchResultClick={handleSearchResultClick}
 
-              {/* Search input */}
-              <form onSubmit={handleRefSearch} className="flex gap-1 mb-2">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={refSearchInputValue}
-                    onChange={(e) => setRefSearchInputValue(e.target.value)}
-                    placeholder={t('translate.searchReference')}
-                    className="w-full pl-6 pr-2 py-1 text-xs border border-amber-300 dark:border-amber-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400"
-                  />
-                  <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-500" />
-                </div>
-                {refSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={handleClearRefSearch}
-                    className="p-1 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200"
-                    title={t('common.cancel')}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </form>
+          chapters={referenceChapters}
+          selectedChapter={selectedRefChapter}
+          onSelectChapter={setSelectedRefChapter}
 
-              {/* Reference chapter selector - only when not searching */}
-              {!refSearchQuery && (
-                <select
-                  value={selectedRefChapter ?? ''}
-                  onChange={(e) => setSelectedRefChapter(Number(e.target.value))}
-                  className="w-full px-1.5 py-1 mb-2 text-xs border border-amber-300 dark:border-amber-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                >
-                  {referenceChapters?.map((ch) => (
-                    <option key={ch.chapter_number} value={ch.chapter_number}>
-                      {ch.title || `Ch ${ch.chapter_number}`} ({ch.paragraph_count})
-                    </option>
-                  ))}
-                </select>
-              )}
+          isLoadingContent={isLoadingRefContent}
+          chapterContent={referenceChapterContent}
+          highlightedParagraph={highlightedRefParagraph}
 
-              {/* Reference content */}
-              <div className="flex-1 overflow-y-auto">
-                {/* Search results */}
-                {refSearchQuery ? (
-                  isSearchingRef ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
-                    </div>
-                  ) : searchResults && searchResults.results.length > 0 ? (
-                    <div className="space-y-1.5">
-                      <div className={`${fontClasses.xs} text-amber-600 dark:text-amber-400 mb-2`}>
-                        {t('translate.searchResultsCount', { count: String(searchResults.total_results) })}
-                      </div>
-                      {searchResults.results.map((result, idx) => (
-                        <div
-                          key={`${result.chapter_number}-${result.paragraph_number}-${idx}`}
-                          onClick={() => handleSearchResultClick(result.chapter_number, result.paragraph_number)}
-                          className={`${fontClasses.paragraph} text-amber-900 dark:text-amber-100 leading-relaxed p-1.5 rounded cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-700`}
-                        >
-                          <div className={`${fontClasses.xs} text-amber-500 dark:text-amber-500 mb-0.5`}>
-                            {result.chapter_title || `Ch ${result.chapter_number}`} - P{result.paragraph_number}
-                          </div>
-                          <div>
-                            {result.text.slice(0, result.match_start)}
-                            <mark className="bg-amber-300 dark:bg-amber-600 text-amber-900 dark:text-amber-100 px-0.5 rounded">
-                              {result.text.slice(result.match_start, result.match_end)}
-                            </mark>
-                            {result.text.slice(result.match_end)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-amber-600 dark:text-amber-400 text-xs text-center py-4">
-                      {t('translate.noSearchResults')}
-                    </div>
-                  )
-                ) : (
-                  /* Chapter content */
-                  isLoadingRefContent ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
-                    </div>
-                  ) : referenceChapterContent ? (
-                    <div className="space-y-1.5">
-                      {referenceChapterContent.title && (
-                        <h4 className={`font-medium text-amber-900 dark:text-amber-100 ${fontClasses.sm} border-b border-amber-200 dark:border-amber-700 pb-1`}>
-                          {referenceChapterContent.title}
-                        </h4>
-                      )}
-                      {referenceChapterContent.paragraphs.map((para) => (
-                        <div
-                          key={para.paragraph_number}
-                          id={`ref-para-${para.paragraph_number}`}
-                          ref={highlightedRefParagraph === para.paragraph_number ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
-                          className={`${fontClasses.paragraph} text-amber-900 dark:text-amber-100 leading-relaxed p-1 rounded transition-colors duration-300 ${
-                            highlightedRefParagraph === para.paragraph_number
-                              ? 'bg-amber-200 dark:bg-amber-700 ring-2 ring-amber-400'
-                              : 'hover:bg-amber-100 dark:hover:bg-amber-900/40'
-                          }`}
-                        >
-                          <span className={`text-amber-500 dark:text-amber-500 ${fontClasses.xs} mr-1`}>{para.paragraph_number}.</span>
-                          {para.text}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-amber-600 dark:text-amber-400 text-xs text-center py-2">
-                      {t('translate.selectReferenceChapter')}
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+          fontClasses={fontClasses}
+        />
       </div>
 
       {/* Translation Reasoning Chat Modal */}

@@ -26,7 +26,7 @@
     "dismiss": "Dismiss"
   },
   "app": {
-    "title": "EPUB Translator"
+    "title": "ePub Translator"
   },
   "nav": {
     "home": "Home",
@@ -36,11 +36,11 @@
   },
   "home": {
     "title": "My Projects",
-    "subtitle": "Manage your EPUB translation projects",
+    "subtitle": "Manage your ePub translation projects",
     "newProject": "New Project",
     "noProjects": "No Projects Yet",
-    "noProjectsHint": "Upload an EPUB file to start translating",
-    "uploadEpub": "Upload EPUB",
+    "noProjectsHint": "Upload an ePub file to start translating",
+    "uploadEpub": "Upload ePub",
     "unknownAuthor": "Unknown Author",
     "chapters": "chapters",
     "paragraphs": "paragraphs",
@@ -48,9 +48,9 @@
     "favorite": "Toggle favorite"
   },
   "upload": {
-    "title": "Upload EPUB",
-    "subtitle": "Select an English EPUB file to start translating",
-    "dropHint": "Drop EPUB file here, or",
+    "title": "Upload ePub",
+    "subtitle": "Select an English ePub file to start translating",
+    "dropHint": "Drop ePub file here, or",
     "clickToSelect": "click to select",
     "formatHint": "Only .epub format supported",
     "uploading": "Uploading...",
@@ -170,7 +170,7 @@
     "statusFailed": "Failed",
     "statusPending": "Pending",
     "noChapterSelected": "No chapter selected",
-    "exportEpub": "Export EPUB",
+    "exportEpub": "Export ePub",
     "referenceLoaded": "Reference loaded",
     "uploadReference": "Upload Chinese Reference",
     "removeReference": "Remove reference",
@@ -351,8 +351,8 @@
   },
   "export": {
     "title": "Export",
-    "subtitle": "Export your bilingual EPUB",
-    "downloadEpub": "Download EPUB",
+    "subtitle": "Export your bilingual ePub",
+    "downloadEpub": "Download ePub",
     "downloadHtml": "Download HTML",
     "exportButton": "Export",
     "projectInfo": "Project Info",
@@ -367,7 +367,7 @@
     "readyToExport": "Ready to export",
     "translationIncomplete": "Translation incomplete",
     "exportType": "Export Type",
-    "exportTypeEpub": "EPUB Ebook",
+    "exportTypeEpub": "ePub Ebook",
     "exportTypeEpubDesc": "For e-readers",
     "exportTypeHtml": "HTML Webpage",
     "exportTypeHtmlDesc": "For browser reading or printing",
@@ -378,14 +378,15 @@
     "formatChineseOnlyDesc": "Translation content only",
     "selectChapters": "Select Chapters",
     "selectChaptersHint": "Choose chapters to export (empty = all)",
+    "noChaptersToExport": "No chapters available to export",
     "allChaptersSelected": "All chapters will be exported",
     "chaptersSelected": "{{count}} chapter(s) selected",
     "showPreview": "Show Preview",
     "hidePreview": "Hide Preview",
     "allChapters": "All Chapters",
-    "previewNote": "Preview may differ slightly from final EPUB",
+    "previewNote": "Preview may differ slightly from final ePub",
     "noPreview": "No preview available",
-    "clickToPreview": "Click 'Show Preview' to see how the exported EPUB will look",
+    "clickToPreview": "Click 'Show Preview' to see how the exported ePub will look",
     "htmlWidth": "Width",
     "widthNarrow": "Narrow",
     "widthMedium": "Medium",

@@ -167,22 +167,31 @@ class EPUBGenerator:
             for tag in body.find_all(tag_name):
                 original_text = tag.get_text(strip=True)
 
-                if original_text in para_translations:
-                    translated_text = para_translations[original_text]
+                # Skip empty tags
+                if not original_text:
+                    continue
 
-                    # Create bilingual container
-                    container = soup.new_tag("div")
-                    container["class"] = "bilingual-pair"
+                # Check if we have a translation for this paragraph
+                has_translation = original_text in para_translations
+                translated_text = para_translations.get(original_text, "")
 
-                    # Original text
-                    en_div = soup.new_tag("div")
-                    en_div["class"] = "original-text"
-                    en_div["lang"] = "en"
-                    en_p = soup.new_tag(tag.name)
-                    en_p.string = original_text
-                    en_div.append(en_p)
+                # Create bilingual container (always wrap for consistent filtering)
+                container = soup.new_tag("div")
+                container_classes = ["bilingual-pair"]
+                if not has_translation:
+                    container_classes.append("untranslated")
+                container["class"] = " ".join(container_classes)
 
-                    # Translated text
+                # Original text
+                en_div = soup.new_tag("div")
+                en_div["class"] = "original-text"
+                en_div["lang"] = "en"
+                en_p = soup.new_tag(tag.name)
+                en_p.string = original_text
+                en_div.append(en_p)
+
+                # Translated text (only add if we have a translation)
+                if has_translation:
                     cn_div = soup.new_tag("div")
                     cn_div["class"] = "translated-text"
                     cn_div["lang"] = "zh"
@@ -190,11 +199,12 @@ class EPUBGenerator:
                     cn_p.string = translated_text
                     cn_div.append(cn_p)
 
-                    container.append(en_div)
+                container.append(en_div)
+                if has_translation:
                     container.append(cn_div)
 
-                    # Replace original tag
-                    tag.replace_with(container)
+                # Replace original tag
+                tag.replace_with(container)
 
         # For preview mode, return just the body content (the wrapping div)
         if embed_images and body:

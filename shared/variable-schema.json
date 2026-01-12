@@ -10,7 +10,7 @@
     "project": {
       "label": "Project",
       "labelZh": "项目",
-      "description": "Static metadata from the EPUB project",
+      "description": "Static metadata from the ePub project",
       "icon": "BookOpen"
     },
     "content": {
@@ -57,8 +57,8 @@
       "fullName": "project.title",
       "category": "project",
       "type": "string",
-      "description": "Book title from EPUB metadata",
-      "descriptionZh": "EPUB 元数据中的书名",
+      "description": "Book title from ePub metadata",
+      "descriptionZh": "ePub 元数据中的书名",
       "source": "project.epub_title",
       "stages": ["analysis", "translation", "optimization", "proofreading"],
       "example": "Knowing God"
@@ -68,8 +68,8 @@
       "fullName": "project.author",
       "category": "project",
       "type": "string",
-      "description": "Author name from EPUB metadata",
-      "descriptionZh": "EPUB 元数据中的作者名",
+      "description": "Author name from ePub metadata",
+      "descriptionZh": "ePub 元数据中的作者名",
       "source": "project.epub_author",
       "stages": ["analysis", "translation", "optimization", "proofreading"],
       "example": "J.I. Packer"

@@ -1,5 +1,6 @@
 """Translation API routes."""
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -33,6 +34,8 @@ from app.core.translation.models import (
 from app.core.translation.pipeline import PromptEngine, ContextBuilder
 from litellm import acompletion
 import uuid
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -145,8 +148,6 @@ async def start_translation(
         await LLMConfigService.update_last_used(db, llm_config.config_id)
 
     # Log the configuration before starting translation
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info(f"[Translation API] Starting translation: task_id={task.id}, provider={llm_config.provider}, model={llm_config.model}, base_url={llm_config.base_url}, config_id={llm_config.config_id}")
 
     # Start translation in background
@@ -431,9 +432,7 @@ async def retranslate_paragraph(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    import logging
     import traceback
-    logger = logging.getLogger(__name__)
 
     from app.core.translation.pipeline import TranslationPipeline, PipelineConfig
 
@@ -649,7 +648,7 @@ def _extract_suggested_translation(content: str) -> Optional[str]:
         r'\*\*Suggested translation:\*\*\s*["\u201c]([^"\u201d]+)["\u201d]',
         # Pattern: Suggested translation: "translation here"
         r'(?:Suggested|Recommended|Improved|New)\s+translation[:\s]*["\u201c]([^"\u201d]+)["\u201d]',
-        # Pattern: 建议译文: "translation here"
+        # Pattern for Chinese "suggested/recommended translation" phrases (Unicode escaped)
         r'[\u5efa\u8bae\u8bd1\u6587\u63a8\u8350\u8bd1\u6cd5][:\uff1a]\s*["\u201c]([^"\u201d]+)["\u201d]',
     ]
 
@@ -1439,9 +1438,6 @@ async def confirm_translation(
 
     Once confirmed, the translation cannot be changed by re-translation.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     try:
         # Get the latest translation for this paragraph
         result = await db.execute(

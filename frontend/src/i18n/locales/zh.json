@@ -26,7 +26,7 @@
     "dismiss": "忽略"
   },
   "app": {
-    "title": "EPUB 翻译工具"
+    "title": "ePub 翻译工具"
   },
   "nav": {
     "home": "首页",
@@ -36,11 +36,11 @@
   },
   "home": {
     "title": "我的项目",
-    "subtitle": "管理你的 EPUB 翻译项目",
+    "subtitle": "管理你的 ePub 翻译项目",
     "newProject": "新建项目",
     "noProjects": "暂无项目",
-    "noProjectsHint": "上传一个 EPUB 文件开始翻译",
-    "uploadEpub": "上传 EPUB",
+    "noProjectsHint": "上传一个 ePub 文件开始翻译",
+    "uploadEpub": "上传 ePub",
     "unknownAuthor": "未知作者",
     "chapters": "章",
     "paragraphs": "段落",
@@ -48,9 +48,9 @@
     "favorite": "切换收藏"
   },
   "upload": {
-    "title": "上传 EPUB",
-    "subtitle": "选择一个英文 EPUB 文件开始翻译",
-    "dropHint": "拖放 EPUB 文件到此处，或",
+    "title": "上传 ePub",
+    "subtitle": "选择一个英文 ePub 文件开始翻译",
+    "dropHint": "拖放 ePub 文件到此处，或",
     "clickToSelect": "点击选择",
     "formatHint": "仅支持 .epub 格式",
     "uploading": "上传中...",
@@ -170,7 +170,7 @@
     "statusFailed": "失败",
     "statusPending": "等待中",
     "noChapterSelected": "未选择章节",
-    "exportEpub": "导出 EPUB",
+    "exportEpub": "导出 ePub",
     "referenceLoaded": "已加载参考译本",
     "uploadReference": "上传中文参考译本",
     "removeReference": "移除参考译本",
@@ -351,8 +351,8 @@
   },
   "export": {
     "title": "导出",
-    "subtitle": "导出双语 EPUB 电子书",
-    "downloadEpub": "下载 EPUB",
+    "subtitle": "导出双语 ePub 电子书",
+    "downloadEpub": "下载 ePub",
     "downloadHtml": "下载 HTML",
     "exportButton": "导出",
     "projectInfo": "项目信息",
@@ -367,7 +367,7 @@
     "readyToExport": "可以导出",
     "translationIncomplete": "翻译未完成",
     "exportType": "导出类型",
-    "exportTypeEpub": "EPUB 电子书",
+    "exportTypeEpub": "ePub 电子书",
     "exportTypeEpubDesc": "适用于电子书阅读器",
     "exportTypeHtml": "HTML 网页",
     "exportTypeHtmlDesc": "适用于浏览器阅读或打印",
@@ -378,12 +378,13 @@
     "formatChineseOnlyDesc": "只保留翻译内容",
     "selectChapters": "选择章节",
     "selectChaptersHint": "选择要导出的章节（不选则导出全部）",
+    "noChaptersToExport": "无章节可导出",
     "allChaptersSelected": "将导出所有章节",
     "chaptersSelected": "已选择 {{count}} 个章节",
     "showPreview": "显示预览",
     "hidePreview": "隐藏预览",
     "allChapters": "所有章节",
-    "previewNote": "预览可能与最终 EPUB 略有不同",
+    "previewNote": "预览可能与最终 ePub 略有不同",
     "noPreview": "暂无预览",
     "clickToPreview": "点击「显示预览」查看导出后的效果",
     "htmlWidth": "页面宽度",
@@ -545,6 +546,102 @@
       "derived": "派生",
       "meta": "元数据",
       "user": "自定义"
+    }
+  },
+  "variables": {
+    "categories": {
+      "project": {
+        "label": "项目",
+        "description": "来自 ePub 项目的静态元数据"
+      },
+      "content": {
+        "label": "内容",
+        "description": "当前正在处理的段落或文本"
+      },
+      "context": {
+        "label": "上下文",
+        "description": "用于保持翻译连贯性的上下文段落"
+      },
+      "pipeline": {
+        "label": "流水线",
+        "description": "来自前序处理步骤的输出"
+      },
+      "derived": {
+        "label": "派生",
+        "description": "从分析结果中提取的值"
+      },
+      "meta": {
+        "label": "元数据",
+        "description": "运行时计算的值"
+      },
+      "user": {
+        "label": "自定义",
+        "description": "用户为项目特定需求定义的变量"
+      }
+    },
+    "project": {
+      "title": "ePub 元数据中的书名",
+      "author": "ePub 元数据中的作者名",
+      "author_background": "用户提供的作者背景资料",
+      "source_language": "书籍的源语言",
+      "target_language": "翻译的目标语言"
+    },
+    "content": {
+      "source": "待翻译的源文本（规范名称）",
+      "target": "当前译文（规范名称）",
+      "chapter_title": "当前章节的标题",
+      "sample_paragraphs": "用于分析书籍的样本段落",
+      "source_text": "源文本（content.source 的旧名称）",
+      "original_text": "原文（content.source 的旧名称）",
+      "translated_text": "译文（content.target 的旧名称）"
+    },
+    "context": {
+      "previous_source": "上一段的源文本",
+      "previous_target": "上一段的译文",
+      "next_source": "下一段的源文本"
+    },
+    "pipeline": {
+      "reference_translation": "来自现有来源的参考译文",
+      "suggested_changes": "用户确认的优化建议",
+      "existing_translation": "现有译文（content.target 的旧名称）",
+      "previous_translation": "上一段译文（context.previous_target 的旧名称）",
+      "previous_original": "上一段原文（context.previous_source 的旧名称）"
+    },
+    "derived": {
+      "author_name": "从分析结果中提取的作者名",
+      "author_biography": "从分析结果中提取的作者简介",
+      "writing_style": "从分析结果中提取的写作风格",
+      "tone": "从分析结果中提取的语气",
+      "target_audience": "分析中识别的目标读者",
+      "genre_conventions": "分析中识别的体裁惯例",
+      "terminology_table": "从分析结果中提取的术语表（已格式化）",
+      "priority_order": "翻译优先级顺序",
+      "faithfulness_boundary": "必须严格直译的内容",
+      "permissible_adaptation": "允许调整的范围",
+      "red_lines": "翻译禁止项",
+      "style_constraints": "从分析结果中提取的风格/语气约束",
+      "custom_guidelines": "从分析结果中提取的自定义翻译指引",
+      "has_analysis": "项目是否已完成分析",
+      "has_writing_style": "是否定义了写作风格",
+      "has_tone": "是否定义了语气",
+      "has_terminology": "是否存在术语表",
+      "has_target_audience": "是否定义了目标读者",
+      "has_genre_conventions": "是否定义了体裁惯例",
+      "has_translation_principles": "是否定义了翻译原则",
+      "has_custom_guidelines": "是否存在自定义指引",
+      "has_style_constraints": "是否存在风格约束"
+    },
+    "meta": {
+      "word_count": "源文本的词数",
+      "char_count": "源文本的字符数",
+      "paragraph_index": "当前段落在章节中的索引",
+      "chapter_index": "当前章节的索引",
+      "stage": "当前处理阶段"
+    },
+    "user": {
+      "glossary": "项目的自定义术语表",
+      "special_instructions": "项目的特殊处理指令",
+      "macros": "可复用的自定义宏定义"
     }
   }
 }

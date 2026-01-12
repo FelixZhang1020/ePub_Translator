@@ -82,7 +82,7 @@ export function ParameterReviewPage() {
             {/* Stage Header */}
             <button
               onClick={() => toggleStage(stageReview.stage)}
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
               <div className="flex items-center gap-3">
                 {expandedStages[stageReview.stage] ? (
@@ -98,11 +98,10 @@ export function ParameterReviewPage() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-sm font-medium ${
-                  stageReview.input_effective_count === stageReview.input_total_count
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-amber-600 dark:text-amber-400'
-                }`}>
+                <span className={`text-sm font-medium ${stageReview.input_effective_count === stageReview.input_total_count
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-amber-600 dark:text-amber-400'
+                  }`}>
                   {stageReview.input_effective_count}/{stageReview.input_total_count} {t('parameterReview.effective')}
                 </span>
               </div>
@@ -116,7 +115,7 @@ export function ParameterReviewPage() {
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-gray-750">
+                    <thead className="bg-gray-50 dark:bg-gray-700">
                       <tr>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                           {t('parameterReview.status')}
@@ -174,7 +173,7 @@ export function ParameterReviewPage() {
                     </h3>
                     <div className="overflow-x-auto">
                       <table className="w-full">
-                        <thead className="bg-gray-50 dark:bg-gray-750">
+                        <thead className="bg-gray-50 dark:bg-gray-700">
                           <tr>
                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                               Field

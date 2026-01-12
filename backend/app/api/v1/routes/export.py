@@ -154,7 +154,7 @@ async def export_epub_v2(
                 all_paragraphs.append(TranslationMapping(
                     file_path=chapter.html_path,
                     xpath=para.xpath,
-                    translated_text=latest.translated_text if latest else "(待翻译)",
+                    translated_text=latest.translated_text if latest else "(pending)",
                 ))
 
         # Ensure exports directory exists

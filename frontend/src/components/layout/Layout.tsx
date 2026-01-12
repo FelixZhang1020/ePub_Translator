@@ -221,7 +221,7 @@ export function Layout({ children }: LayoutProps) {
               <Link to="/" className="flex items-center gap-2">
                 <BookOpen className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 <span className={`${fontClasses.title} font-semibold text-gray-900 dark:text-white`}>
-                  EPUB Translator
+                  ePub Translator
                 </span>
               </Link>
             </div>

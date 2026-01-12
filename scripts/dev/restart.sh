@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Restart EPUB Translate Services
+# Restart ePub Translate Services
 
 PROJECT_ROOT="/Users/felixzhang/VibeCoding/epub_translate"
 

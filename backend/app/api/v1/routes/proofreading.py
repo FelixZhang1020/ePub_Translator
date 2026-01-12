@@ -91,8 +91,8 @@ async def run_proofreading_background(
     custom_user_prompt: Optional[str] = None,
 ):
     """Run proofreading in background."""
-    from app.models.database.base import async_session_factory
-    async with async_session_factory() as db:
+    from app.models.database.base import async_session_maker
+    async with async_session_maker() as db:
         await proofreading_service.run_proofreading(
             db=db,
             session_id=session_id,

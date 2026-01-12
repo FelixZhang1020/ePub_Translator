@@ -21,7 +21,6 @@ export interface SchemaVariable {
   category: string
   type: VariableType
   description: string
-  descriptionZh: string
   source: string
   stages: PromptStage[]
   example: string
@@ -36,7 +35,6 @@ export interface SchemaVariable {
  */
 export interface SchemaCategory {
   label: string
-  labelZh: string
   description: string
   icon: string
 }

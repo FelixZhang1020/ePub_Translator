@@ -14,7 +14,7 @@ This document describes all available variables for prompt templates, organized 
 ## Variable Categories
 
 ### Project
-Static metadata from the EPUB project (available in all stages)
+Static metadata from the ePub project (available in all stages)
 
 ### Content
 Current paragraph or text being processed
@@ -43,8 +43,8 @@ Variables available when generating analysis results.
 ### Project Variables (4)
 | Variable | Type | Description | Example |
 |----------|------|-------------|---------|
-| `{{project.title}}` | string | Book title from EPUB metadata | "Knowing God" |
-| `{{project.author}}` | string | Author name from EPUB metadata | "J.I. Packer" |
+| `{{project.title}}` | string | Book title from ePub metadata | "Knowing God" |
+| `{{project.author}}` | string | Author name from ePub metadata | "J.I. Packer" |
 | `{{project.source_language}}` | string | Source language of the book | "en" |
 | `{{project.target_language}}` | string | Target translation language | "zh-CN" |
 

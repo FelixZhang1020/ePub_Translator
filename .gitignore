@@ -38,8 +38,6 @@ yarn-error.log*
 
 # Build outputs
 frontend/dist/
-backend/outputs/
-backend/uploads/
 
 # Test
 .pytest_cache/
@@ -55,14 +53,19 @@ logs/
 *.temp
 .cache/
 
-# Test data
-test-payload.json
-proofread-payload.json
-vars.json
-backend/test_data/
+# Data directories (keep .gitkeep files)
+data/temp/uploads/*
+!data/temp/uploads/.gitkeep
+data/temp/outputs/*
+!data/temp/outputs/.gitkeep
 
-# Project uploads and data
+# Project data (per-project storage)
 projects/*/uploads/
+projects/*/exports/
+projects/*/cache/
 
-# Migration scripts (local only)
-backend/scripts/
+# Sample EPUB files (optional - uncomment to ignore)
+# epub_sample/
+
+# Test fixtures are tracked
+# tests/fixtures/

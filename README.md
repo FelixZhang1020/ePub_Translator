@@ -1,6 +1,6 @@
-# EPUB Translator
+# ePub Translator
 
-A comprehensive EPUB translation tool powered by LLMs. Translate English EPUB books to Chinese while preserving formatting, style, and context.
+A comprehensive ePub translation tool powered by LLMs. Translate English ePub books to Chinese while preserving formatting, style, and context.
 
 ## Features
 
@@ -9,7 +9,7 @@ A comprehensive EPUB translation tool powered by LLMs. Translate English EPUB bo
 - **Book Analysis**: Automatic extraction of writing style, tone, and terminology
 - **Reference Matching**: Match paragraphs with existing translations for consistency
 - **Prompt Management**: Customizable system and user prompts with variable support
-- **Bilingual Export**: Generate translated EPUB with original/translated text
+- **Bilingual Export**: Generate translated ePub with original/translated text
 
 ## Prerequisites
 
@@ -76,7 +76,7 @@ epub_translate/
 │   │   ├── api/v1/routes/    # API endpoints (10 modules)
 │   │   ├── core/             # Business logic
 │   │   │   ├── analysis/     # Book analysis service
-│   │   │   ├── epub/         # EPUB parsing and generation
+│   │   │   ├── epub/         # ePub parsing and generation
 │   │   │   ├── llm/          # LLM provider adapters
 │   │   │   ├── matching/     # Reference paragraph matching
 │   │   │   ├── proofreading/ # Proofreading service
@@ -120,24 +120,24 @@ epub_translate/
 
 The backend provides 102+ API endpoints organized by feature:
 
-- `/api/v1/upload` - EPUB upload and project creation
+- `/api/v1/upload` - ePub upload and project creation
 - `/api/v1/analysis` - Book content analysis
 - `/api/v1/translation` - Translation workflow
 - `/api/v1/proofreading` - Proofreading suggestions
-- `/api/v1/export` - EPUB export
+- `/api/v1/export` - ePub export
 - `/api/v1/prompts` - Prompt template management
 - `/api/v1/llm-settings` - LLM configuration
 - `/api/v1/workflow` - Workflow state management
-- `/api/v1/reference` - Reference EPUB matching
+- `/api/v1/reference` - Reference ePub matching
 - `/api/v1/preview` - Chapter content preview
 
 ## Workflow
 
-1. **Upload**: Upload an English EPUB file
+1. **Upload**: Upload an English ePub file
 2. **Analysis**: AI analyzes the book to extract style, tone, and terminology
 3. **Translation**: Translate paragraphs with context-aware prompts
 4. **Proofreading**: Review and refine translations
-5. **Export**: Generate bilingual EPUB output
+5. **Export**: Generate bilingual ePub output
 
 ## Prompt Variables
 

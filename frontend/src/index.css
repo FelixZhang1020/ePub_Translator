@@ -46,7 +46,33 @@ html {
   background: #9ca3af;
 }
 
+
 /* Dark mode body background */
 .dark body {
   background-color: #111827;
 }
+
+/* Export Preview - Dark Mode Overrides for Backend Generated CSS */
+.dark .original-text {
+  color: #e5e7eb !important; /* gray-200 */
+}
+
+.dark .translated-text {
+  color: #60a5fa !important; /* blue-400 */
+}
+
+.dark .bilingual-pair {
+  border-bottom-color: #374151 !important; /* gray-700 */
+}
+
+/* Export Preview - Display Formatting */
+/* When container has class 'preview-translated', hide original text */
+.preview-translated .original-text {
+  display: none !important;
+}
+
+/* When container has class 'preview-translated', make translated text standalone style if needed */
+.preview-translated .translated-text {
+  /* optional adjustments */
+}
+

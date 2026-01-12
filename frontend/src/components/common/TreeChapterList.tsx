@@ -58,6 +58,45 @@ function collectChapterIds(node: TocItem): string[] {
   return ids
 }
 
+/** Recursively calculate aggregated stats for a node
+ * For leaf nodes (no children): returns the node's own stats
+ * For parent nodes (has children): returns only the sum of children's stats (to avoid double-counting)
+ */
+function calculateAggregatedStats(
+  node: TocItem,
+  chapterStatsMap: Map<string, ChapterStats> | undefined
+): ChapterStats | null {
+  if (!chapterStatsMap) return null
+
+  const hasChildren = node.children && node.children.length > 0
+
+  // For parent nodes with children, only aggregate children's stats (avoid double-counting)
+  if (hasChildren) {
+    let totalTranslated = 0
+    let totalCount = 0
+
+    for (const child of node.children) {
+      const childStats = calculateAggregatedStats(child, chapterStatsMap)
+      if (childStats) {
+        totalTranslated += childStats.translated
+        totalCount += childStats.total
+      }
+    }
+
+    if (totalCount > 0) {
+      return { translated: totalTranslated, total: totalCount }
+    }
+    return null
+  }
+
+  // For leaf nodes, return the node's own stats
+  if (node.chapter_id && chapterStatsMap.has(node.chapter_id)) {
+    return chapterStatsMap.get(node.chapter_id)!
+  }
+
+  return null
+}
+
 /** Check if a TOC node or any of its descendants contains the target chapter */
 function containsChapter(node: TocItem, chapterId: string | null): boolean {
   if (!chapterId) return false
@@ -111,6 +150,11 @@ function TocNode({
     const hasAnySelected = childChapterIds.some(id => selectedChapterIds?.has(id))
     return hasAnySelected && !allChildrenSelected
   }, [showCheckboxes, childChapterIds, selectedChapterIds, allChildrenSelected])
+
+  // Calculate aggregated stats for this node (includes children's stats for parent nodes)
+  const aggregatedStats = useMemo(() => {
+    return calculateAggregatedStats(item, chapterStatsMap)
+  }, [item, chapterStatsMap])
 
   // Check if any direct child is selected (for highlighting logic)
   const hasSelectedChild = hasChildren && item.children.some(child => child.chapter_id === selectedChapterId)
@@ -275,10 +319,10 @@ function TocNode({
           {item.title || t('preview.untitled')}
         </span>
 
-        {/* Chapter stats (translated/total) */}
-        {!minimal && item.chapter_id && chapterStatsMap?.has(item.chapter_id) && (
+        {/* Chapter stats (translated/total) - shows aggregated stats for parent nodes */}
+        {!minimal && aggregatedStats && (
           <span className={`${badgeSizeClass} text-gray-500 dark:text-gray-400 ml-1 whitespace-nowrap`}>
-            {chapterStatsMap.get(item.chapter_id)!.translated} / {chapterStatsMap.get(item.chapter_id)!.total}
+            {aggregatedStats.translated} / {aggregatedStats.total}
           </span>
         )}
 

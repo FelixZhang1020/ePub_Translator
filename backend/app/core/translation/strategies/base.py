@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 from ..models.context import TranslationContext
 from ..models.prompt import PromptBundle
+from app.utils.text import safe_truncate
 
 
 class PromptStrategy(ABC):
@@ -64,6 +65,8 @@ class PromptStrategy(ABC):
     ) -> str:
         """Truncate text for context inclusion.
 
+        Uses safe_truncate to avoid breaking multi-byte characters.
+
         Args:
             text: Text to truncate
             max_chars: Maximum characters to include
@@ -73,4 +76,4 @@ class PromptStrategy(ABC):
         """
         if len(text) <= max_chars:
             return text
-        return text[:max_chars] + "..."
+        return safe_truncate(text, max_chars)

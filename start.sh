@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EPUB Translator - Start Script
+# ePub Translator - Start Script
 # Starts both backend and frontend servers with configurable ports
 
 set -e
@@ -25,7 +25,7 @@ if [ -f "$SCRIPT_DIR/frontend/.env" ]; then
 fi
 
 echo "=========================================="
-echo "   EPUB Translator - Starting..."
+echo "   ePub Translator - Starting..."
 echo "=========================================="
 echo ""
 echo "Configuration:"

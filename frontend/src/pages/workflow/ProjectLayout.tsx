@@ -206,36 +206,29 @@ export function ProjectLayout() {
 
   // Check if on translate page for wider layout
   const isTranslatePage = location.pathname.includes('/translate')
+  // Check if on export page for full-height layout
+  const isExportPage = location.pathname.includes('/export')
 
   return (
-    <div className={isTranslatePage ? 'w-full h-full flex flex-col' : 'max-w-6xl mx-auto'}>
-      {/* Header - compact for translate page */}
-      <div className={isTranslatePage ? 'mb-1 flex-shrink-0' : 'mb-6'}>
-        {!isTranslatePage && (
-          <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {t('nav.home')}
-          </button>
-        )}
+    <div className={isTranslatePage || isExportPage ? 'w-full h-full flex flex-col' : 'max-w-6xl mx-auto'}>
+      {/* Header - unified format for all pages */}
+      <div className={isTranslatePage || isExportPage ? 'mb-2 flex-shrink-0' : 'mb-6'}>
+        {/* Breadcrumb - consistent across all pages */}
+        <button
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          {t('nav.home')}
+        </button>
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {isTranslatePage && (
-              <button
-                onClick={() => navigate('/')}
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-            )}
             <div>
-              <h1 className={`font-bold text-gray-900 dark:text-gray-100 ${isTranslatePage ? 'text-lg' : 'text-2xl'}`}>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                 {project.name}
               </h1>
-              {project.author && !isTranslatePage && (
+              {project.author && (
                 <p className="text-gray-600 dark:text-gray-400 mt-1">
                   {t('common.by')} {project.author}
                 </p>
@@ -253,11 +246,10 @@ export function ProjectLayout() {
       </div>
 
       {/* Page Content */}
-      <div className={`${
-        isTranslatePage
+      <div className={`${isTranslatePage || isExportPage
           ? 'flex-1 min-h-0 overflow-hidden'
           : 'mt-8'
-      }`}>
+        }`}>
         <Outlet context={{ project, workflowStatus: effectiveWorkflowStatus, refetchWorkflow }} />
       </div>
     </div>

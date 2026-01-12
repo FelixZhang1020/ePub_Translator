@@ -26,6 +26,7 @@ import {
   type VariableCategoryInfo,
   type VariableDefinition,
 } from '../../data/variableRegistry'
+import { safeTruncate } from '../../utils/text'
 
 const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   BookOpen,
@@ -77,11 +78,12 @@ export function VariablePanel({
       variables: category.variables.filter((v) => {
         if (!searchQuery) return true
         const query = searchQuery.toLowerCase()
+        const descZh = t(`variables.${category.id}.${v.name}`, { defaultValue: '' })
         return (
           v.name.toLowerCase().includes(query) ||
           v.fullName.toLowerCase().includes(query) ||
           v.description.toLowerCase().includes(query) ||
-          v.descriptionZh.includes(query)
+          descZh.toLowerCase().includes(query)
         )
       }),
     }))
@@ -179,6 +181,7 @@ export function VariablePanel({
             language={language}
             fontClasses={fontClasses}
             usedVars={validation?.valid || []}
+            t={t}
           />
         ))}
 
@@ -210,6 +213,7 @@ interface CategorySectionProps {
   language: string
   fontClasses: typeof fontSizeClasses.medium
   usedVars: string[]
+  t: (key: string, options?: { defaultValue?: string }) => string
 }
 
 function CategorySection({
@@ -223,6 +227,7 @@ function CategorySection({
   language,
   fontClasses,
   usedVars,
+  t,
 }: CategorySectionProps) {
   const Icon = CATEGORY_ICONS[category.icon] || FileText
 
@@ -240,7 +245,7 @@ function CategorySection({
         )}
         <Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
         <span className={`${fontClasses.sm} font-medium text-gray-700 dark:text-gray-300`}>
-          {language === 'zh' ? category.labelZh : category.label}
+          {language === 'zh' ? t(`variables.categories.${category.id}.label`) : category.label}
         </span>
         <span className={`${fontClasses.xs} text-gray-400`}>
           ({category.variables.length})
@@ -261,6 +266,7 @@ function CategorySection({
               language={language}
               fontClasses={fontClasses}
               isUsed={usedVars.includes(variable.fullName) || usedVars.includes(variable.name)}
+              t={t}
             />
           ))}
         </div>
@@ -278,6 +284,7 @@ interface VariableItemProps {
   language: string
   fontClasses: typeof fontSizeClasses.medium
   isUsed: boolean
+  t: (key: string, options?: { defaultValue?: string }) => string
 }
 
 function VariableItem({
@@ -289,6 +296,7 @@ function VariableItem({
   language,
   fontClasses,
   isUsed,
+  t,
 }: VariableItemProps) {
   const [showDetails, setShowDetails] = useState(false)
 
@@ -318,7 +326,9 @@ function VariableItem({
           </div>
           {!compact && (
             <p className={`${fontClasses.xs} text-gray-500 dark:text-gray-400 truncate mt-0.5`}>
-              {language === 'zh' ? variable.descriptionZh : variable.description}
+              {language === 'zh'
+                ? t(`variables.${variable.fullName.split('.')[0]}.${variable.name}`, { defaultValue: variable.description })
+                : variable.description}
             </p>
           )}
         </div>
@@ -368,7 +378,7 @@ function VariableItem({
               <span className="text-gray-500 dark:text-gray-400">Example:</span>
               <code className="ml-1 text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 px-1 rounded">
                 {variable.example.length > 60
-                  ? variable.example.substring(0, 60) + '...'
+                  ? safeTruncate(variable.example, 60)
                   : variable.example}
               </code>
             </div>

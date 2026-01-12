@@ -60,9 +60,10 @@ export function ResizeHandle({
     <div
       onMouseDown={handleMouseDown}
       className={`
-        ${isHorizontal ? 'w-2 cursor-col-resize' : 'h-2 cursor-row-resize'}
-        ${isDragging ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-blue-400 dark:hover:bg-blue-500'}
-        transition-colors flex-shrink-0 group relative mx-0.5
+        ${isHorizontal ? 'w-3 cursor-col-resize' : 'h-3 cursor-row-resize'}
+        ${isDragging ? 'bg-blue-500' : 'bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700'}
+        transition-colors flex-shrink-0 group relative
+        flex items-center justify-center
         ${className}
       `}
       style={{ touchAction: 'none' }}
@@ -75,16 +76,15 @@ export function ResizeHandle({
         `}
         onMouseDown={handleMouseDown}
       />
-      {/* Grip dots indicator */}
+      {/* Grip dots indicator - centered using flex parent */}
       <div
         className={`
-          absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-          flex ${isHorizontal ? 'flex-col' : 'flex-row'} gap-1
+          flex ${isHorizontal ? 'flex-col' : 'flex-row'} gap-0.5
         `}
       >
-        <div className="w-1 h-1 rounded-full bg-gray-500 dark:bg-gray-400" />
-        <div className="w-1 h-1 rounded-full bg-gray-500 dark:bg-gray-400" />
-        <div className="w-1 h-1 rounded-full bg-gray-500 dark:bg-gray-400" />
+        <div className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500" />
+        <div className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500" />
+        <div className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500" />
       </div>
     </div>
   )

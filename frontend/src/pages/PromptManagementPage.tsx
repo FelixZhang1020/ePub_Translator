@@ -25,6 +25,7 @@ import { api, PromptTemplateDB, Project, ProjectVariable, CreateProjectVariableR
 import { useTranslation, useAppStore, fontSizeClasses } from '../stores/appStore'
 import { VariablePanel } from '../components/prompts/VariablePanel'
 import type { PromptStage } from '../data/variableRegistry'
+import { safeTruncate } from '../utils/text'
 
 type PromptCategory = 'analysis' | 'translation' | 'optimization' | 'proofreading'
 
@@ -991,8 +992,9 @@ function ProjectPromptConfigs({
               {config?.resolved_user_prompt && (
                 <div className="px-3 py-2 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600">
                   <p className={`${fontClasses.xs} text-gray-500 dark:text-gray-400 font-mono truncate`}>
-                    {config.resolved_user_prompt.substring(0, 100)}
-                    {config.resolved_user_prompt.length > 100 ? '...' : ''}
+                    {config.resolved_user_prompt.length > 100
+                      ? safeTruncate(config.resolved_user_prompt, 100)
+                      : config.resolved_user_prompt}
                   </p>
                 </div>
               )}
@@ -1351,7 +1353,7 @@ function ProjectVariablesManager({
                   </p>
                 )}
                 <p className={`mt-1 ${fontClasses.xs} font-mono text-gray-400 dark:text-gray-500 truncate`}>
-                  {variable.value.length > 50 ? variable.value.substring(0, 50) + '...' : variable.value}
+                  {variable.value.length > 50 ? safeTruncate(variable.value, 50) : variable.value}
                 </p>
               </div>
               <div className="flex items-center gap-1 ml-2">

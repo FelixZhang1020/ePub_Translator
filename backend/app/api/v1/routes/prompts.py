@@ -25,6 +25,7 @@ from app.models.database import (
     Project,
     BookAnalysis,
 )
+from app.utils.text import safe_truncate
 
 router = APIRouter()
 
@@ -853,10 +854,10 @@ async def get_parameter_review(
                 if value is None:
                     value_preview = "(empty)"
                 elif isinstance(value, str):
-                    value_preview = value[:100] + "..." if len(value) > 100 else value
+                    value_preview = safe_truncate(value, 100) if len(value) > 100 else value
                 elif isinstance(value, (list, dict)):
                     value_str = str(value)
-                    value_preview = value_str[:100] + "..." if len(value_str) > 100 else value_str
+                    value_preview = safe_truncate(value_str, 100) if len(value_str) > 100 else value_str
                 else:
                     value_preview = str(value)
 

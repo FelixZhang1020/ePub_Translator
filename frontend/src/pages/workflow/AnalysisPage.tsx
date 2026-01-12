@@ -3,7 +3,7 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Play, Check, RefreshCw, ArrowRight, BookOpen, FileText } from 'lucide-react'
 import { api, Project, WorkflowStatus, AnalysisProgressEvent } from '../../services/api/client'
-import { useTranslation, useAppStore } from '../../stores/appStore'
+import { useTranslation, useAppStore, fontSizeClasses } from '../../stores/appStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PromptPreviewModal } from '../../components/common/PromptPreviewModal'
 import { LLMConfigSelector } from '../../components/common/LLMConfigSelector'
@@ -56,6 +56,10 @@ export function AnalysisPage() {
 
   // Global analyzing state for header display
   const setGlobalIsAnalyzing = useAppStore((state) => state.setIsAnalyzing)
+
+  // Font size from app store
+  const fontSize = useAppStore((state) => state.fontSize)
+  const fontClasses = fontSizeClasses[fontSize]
 
   // Form state - stores the raw_analysis as editable form data
   const [formData, setFormData] = useState<Record<string, unknown>>({})
@@ -251,7 +255,7 @@ export function AnalysisPage() {
         <div className="flex items-center justify-between">
           {/* Left side: Title */}
           <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            <h2 className={`font-semibold text-gray-900 dark:text-gray-100 ${fontClasses.heading}`}>
               {t('workflow.analysis')}
             </h2>
           </div>

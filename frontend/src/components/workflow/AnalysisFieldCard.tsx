@@ -13,6 +13,7 @@ import {
   Hash,
 } from 'lucide-react'
 import { useTranslation } from '../../stores/appStore'
+import { safeTruncate, safeTruncateJson } from '../../utils/text'
 
 // Icon mapping for known field types
 const FIELD_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -105,7 +106,7 @@ export function AnalysisFieldCard({
     if (valueType === 'empty') return t('analysis.noData') || 'No data'
     if (valueType === 'string') {
       const str = value as string
-      return str.length > 100 ? str.slice(0, 100) + '...' : str
+      return str.length > 100 ? safeTruncate(str, 100) : str
     }
     if (valueType === 'stringArray') {
       const arr = value as string[]
@@ -116,7 +117,7 @@ export function AnalysisFieldCard({
       return `${arr.length} ${t('analysis.terms') || 'terms'}`
     }
     if (valueType === 'array' || valueType === 'object') {
-      return JSON.stringify(value).slice(0, 80) + '...'
+      return safeTruncateJson(value, 80)
     }
     return String(value)
   }, [value, valueType, t])

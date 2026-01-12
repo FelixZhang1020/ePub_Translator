@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="EPUB Translation Tool with LLM support",
+    description="ePub Translation Tool with LLM support",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -52,7 +52,7 @@ app.include_router(cache.router, prefix="/api/v1", tags=["cache"])
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {"message": "EPUB Translator API", "version": "0.1.0"}
+    return {"message": "ePub Translator API", "version": "0.1.0"}
 
 
 @app.get("/health")
