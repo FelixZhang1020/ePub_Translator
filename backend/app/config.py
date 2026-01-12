@@ -1,6 +1,7 @@
 """Application configuration."""
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,6 +32,14 @@ class Settings(BaseSettings):
 
     # CORS - dynamically built based on frontend_port
     cors_origins: list[str] = []
+
+    # LLM API Keys (loaded from environment, used by LLMConfigService)
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    dashscope_api_key: Optional[str] = None  # Alibaba Qwen
+    deepseek_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
