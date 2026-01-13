@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
+from app.core.llm.runtime_config import LLMRuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,36 +41,62 @@ class TranslationOrchestrator:
     def __init__(
         self,
         task_id: str,
-        provider: str,
-        model: str,
-        api_key: str,
+        llm_config: Optional[LLMRuntimeConfig] = None,
+        *,
+        # Legacy parameters for backward compatibility
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        temperature: Optional[float] = None,
+        base_url: Optional[str] = None,
+        # Workflow parameters
         resume: bool = False,
         custom_system_prompt: Optional[str] = None,
         custom_user_prompt: Optional[str] = None,
         use_iterative: bool = False,
-        temperature: Optional[float] = None,
-        base_url: Optional[str] = None,
     ):
         """Initialize the orchestrator.
 
         Args:
             task_id: Translation task ID
-            provider: LLM provider name
-            model: Model identifier
-            api_key: API key for provider
+            llm_config: LLM runtime configuration (recommended, new way)
+            provider: LLM provider name (legacy, for backward compatibility)
+            model: Model identifier (legacy, for backward compatibility)
+            api_key: API key for provider (legacy, for backward compatibility)
+            temperature: LLM temperature override (legacy, for backward compatibility)
+            base_url: Custom API endpoint (legacy, for backward compatibility)
             resume: Whether to resume from checkpoint
             custom_system_prompt: Optional custom system prompt
             custom_user_prompt: Optional custom user prompt
             use_iterative: Whether to use iterative (2-step) translation
-            temperature: LLM temperature override
-            base_url: Custom API endpoint (for OpenRouter, Ollama, etc.)
         """
         self.task_id = task_id
-        self.provider = provider
-        self.model = model
-        self.api_key = api_key
-        self.temperature = temperature
-        self.base_url = base_url
+
+        # Support both new and legacy initialization
+        if llm_config:
+            self.llm_config = llm_config
+            self.provider = llm_config.provider
+            self.model = llm_config.model
+            self.api_key = llm_config.api_key
+            self.temperature = llm_config.temperature
+            self.base_url = llm_config.base_url
+        else:
+            # Legacy: Build config from individual params
+            if not provider or not model or not api_key:
+                raise ValueError("Either llm_config or provider/model/api_key must be provided")
+            self.llm_config = LLMRuntimeConfig(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                temperature=temperature,
+                base_url=base_url,
+            )
+            self.provider = provider
+            self.model = model
+            self.api_key = api_key
+            self.temperature = temperature
+            self.base_url = base_url
+
         self.resume = resume
         self.custom_system_prompt = custom_system_prompt
         self.custom_user_prompt = custom_user_prompt
@@ -77,7 +104,10 @@ class TranslationOrchestrator:
         self._should_stop = False
 
         # Log configuration for debugging
-        logger.info(f"[Orchestrator] Initialized: task_id={task_id}, provider={provider}, model={model}, temperature={temperature}, base_url={base_url}")
+        logger.info(
+            f"[Orchestrator] Initialized: task_id={task_id}, provider={self.provider}, "
+            f"model={self.model}, temperature={self.temperature}, base_url={self.base_url}"
+        )
 
     async def run(self):
         """Run the translation task."""
@@ -95,14 +125,10 @@ class TranslationOrchestrator:
                 # Determine translation mode
                 mode = self._determine_mode(task.mode)
 
-                # Create pipeline
+                # Create pipeline with unified config
                 config = PipelineConfig(
-                    provider=self.provider,
-                    model=self.model,
-                    api_key=self.api_key,
+                    llm_config=self.llm_config,
                     mode=mode,
-                    temperature=self.temperature,
-                    base_url=self.base_url,
                 )
                 pipeline = TranslationPipeline(config)
 

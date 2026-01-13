@@ -480,11 +480,14 @@ class ContextBuilder:
                 "genre_conventions": book_analysis.genre_conventions,
             }
 
-            # Format terminology as table
+            # Format terminology as table, filtering out invalid translations
             if book_analysis.key_terminology:
+                # Placeholder values to filter out
+                invalid_placeholders = {"undefined", "null", "n/a", "none", "tbd", ""}
                 term_lines = [
                     f"- {en}: {zh}"
                     for en, zh in book_analysis.key_terminology.items()
+                    if zh and str(zh).strip().lower() not in invalid_placeholders
                 ]
                 derived["terminology_table"] = "\n".join(term_lines)
 

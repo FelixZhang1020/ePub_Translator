@@ -12,6 +12,7 @@ from app.models.database import get_db
 from app.models.schemas import LLMConfigMixin, LLMTaskRequest
 from app.core.analysis.service import analysis_service
 from app.core.llm.config_service import LLMConfigService
+from app.core.llm.runtime_config import LLMConfigResolver, LLMConfigOverride
 
 router = APIRouter()
 
@@ -59,15 +60,37 @@ async def start_analysis(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        # Build override from request parameters
+        override = None
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            # Convert to new format
+            from app.core.llm.runtime_config import LLMRuntimeConfig
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="analysis",  # Stage-specific temperature default
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -112,15 +135,34 @@ async def start_analysis_stream(
     Returns Server-Sent Events (SSE) stream with progress updates.
     Each event is a JSON object with: step, progress (0-100), message, and optional data.
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            from app.core.llm.runtime_config import LLMRuntimeConfig
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="analysis",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -219,15 +261,34 @@ async def regenerate_field(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            from app.core.llm.runtime_config import LLMRuntimeConfig
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="analysis",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

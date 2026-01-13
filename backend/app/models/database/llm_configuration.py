@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, DateTime, Boolean, Text, Float
+from sqlalchemy import Column, String, DateTime, Boolean, Text, Float, Integer
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -34,6 +34,10 @@ class LLMConfiguration(Base):
     api_key = Column(Text, nullable=True)  # Encrypted API key (or plain for simplicity)
     base_url = Column(String(500), nullable=True)  # Custom base URL (for Ollama, etc.)
     temperature = Column(Float, nullable=True, default=0.7)  # LLM temperature (0.0-2.0)
+    max_tokens = Column(Integer, nullable=True, default=4096)  # Max output tokens
+    top_p = Column(Float, nullable=True)  # Top-p sampling parameter
+    frequency_penalty = Column(Float, nullable=True)  # Frequency penalty (-2.0 to 2.0)
+    presence_penalty = Column(Float, nullable=True)  # Presence penalty (-2.0 to 2.0)
     is_default = Column(Boolean, default=False)  # Default configuration
     is_active = Column(Boolean, default=True)  # Currently selected configuration
 
@@ -89,6 +93,10 @@ class LLMConfiguration(Base):
             "model": self.model,
             "base_url": self.base_url,
             "temperature": self.temperature if self.temperature is not None else 0.7,
+            "max_tokens": self.max_tokens if self.max_tokens is not None else 4096,
+            "top_p": self.top_p,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
             "is_default": self.is_default,
             "is_active": self.is_active,
             "has_api_key": self.has_effective_api_key(),

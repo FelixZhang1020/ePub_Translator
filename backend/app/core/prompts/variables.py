@@ -580,8 +580,8 @@ class VariableService:
                         or ""
                     )
                     zh = (
-                        term.get("recommended_chinese")
-                        or term.get("chinese_translation")
+                        term.get("chinese_translation")
+                        or term.get("recommended_chinese")
                         or term.get("chinese")
                         or ""
                     )

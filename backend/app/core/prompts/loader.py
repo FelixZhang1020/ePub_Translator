@@ -986,15 +986,21 @@ class PromptLoader:
         Returns:
             Terminology list string
         """
+        # Placeholder values to filter out
+        invalid_placeholders = {"undefined", "null", "n/a", "none", "tbd", ""}
+        
+        def is_valid(zh: Any) -> bool:
+            return zh and str(zh).strip().lower() not in invalid_placeholders
+        
         if isinstance(value, dict):
-            return "\n".join(f"- {en}: {zh}" for en, zh in value.items())
+            return "\n".join(f"- {en}: {zh}" for en, zh in value.items() if is_valid(zh))
         elif isinstance(value, list):
             lines = []
             for term in value:
                 if isinstance(term, dict):
                     en = term.get("english_term") or term.get("english", "")
                     zh = term.get("chinese_translation") or term.get("chinese", "")
-                    if en and zh:
+                    if en and is_valid(zh):
                         lines.append(f"- {en}: {zh}")
                 else:
                     lines.append(f"- {term}")

@@ -10,6 +10,7 @@ from app.models.database import get_db
 from app.models.schemas import LLMTaskRequest
 from app.core.proofreading.service import proofreading_service
 from app.core.llm.config_service import LLMConfigService
+from app.core.llm.runtime_config import LLMConfigResolver, LLMRuntimeConfig
 
 
 router = APIRouter()
@@ -128,15 +129,33 @@ async def start_proofreading(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="proofreading",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -348,14 +367,15 @@ async def get_quick_recommendation(
     Uses a simple prompt with original text, current translation, and feedback
     to generate an improved translation.
     """
-    import os
     from litellm import acompletion
 
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
+        # Use new resolver with stage-specific defaults for proofreading
+        llm_config = await LLMConfigResolver.resolve(
             db,
             config_id=request.config_id,
+            stage="proofreading",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -374,32 +394,15 @@ Feedback:
 
 Please provide an improved translation that addresses the feedback. Output ONLY the improved translation, nothing else."""
 
-    # Build litellm model string
-    provider = llm_config.provider
-    model = llm_config.model
-    if provider in ["openai", "anthropic", "gemini", "deepseek"]:
-        litellm_model = model
-    else:
-        litellm_model = f"{provider}/{model}"
-
-    # Set API key
-    if llm_config.api_key:
-        provider_env_map = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "gemini": "GEMINI_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-        }
-        env_var = provider_env_map.get(provider, f"{provider.upper()}_API_KEY")
-        os.environ[env_var] = llm_config.api_key
-
+    # Use LLMRuntimeConfig's built-in methods for litellm call
     try:
         response = await acompletion(
-            model=litellm_model,
+            model=llm_config.get_litellm_model(),
             messages=[
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
+            api_key=llm_config.api_key,
+            temperature=llm_config.temperature,  # Uses stage-specific default from resolver
         )
 
         recommended_translation = response.choices[0].message.content.strip()

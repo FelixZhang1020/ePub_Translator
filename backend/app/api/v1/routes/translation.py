@@ -21,6 +21,7 @@ from app.models.database.paragraph import Paragraph
 from app.models.database.chapter import Chapter
 from app.core.translation.orchestrator import TranslationOrchestrator
 from app.core.llm.config_service import LLMConfigService
+from app.core.llm.runtime_config import LLMConfigResolver, LLMRuntimeConfig
 from app.core.prompts.loader import PromptLoader
 from app.core.llm.prompts import CONVERSATION_SYSTEM_PROMPT
 from app.core.translation.models import TranslationMode
@@ -76,15 +77,34 @@ async def start_translation(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            # Convert to new format
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="translation",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -146,13 +166,9 @@ async def start_translation(
     # Custom prompts from request override file-based prompts for this session
     orchestrator = TranslationOrchestrator(
         task_id=task.id,
-        provider=llm_config.provider,
-        model=llm_config.model,
-        api_key=llm_config.api_key,
+        llm_config=llm_config,
         custom_system_prompt=request.custom_system_prompt,
         custom_user_prompt=request.custom_user_prompt,
-        temperature=llm_config.temperature,
-        base_url=llm_config.base_url,
     )
     background_tasks.add_task(orchestrator.run)
 
@@ -238,15 +254,33 @@ async def resume_translation(
     if task.status != TaskStatus.PAUSED.value:
         raise HTTPException(status_code=400, detail="Task is not paused")
 
-    # Resolve LLM configuration (use task's provider/model, just need API key)
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=task.model,
-            provider=task.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key:
+            # Direct API key provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=task.model,
+                provider=task.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="translation",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -257,15 +291,21 @@ async def resume_translation(
     if llm_config.config_id:
         await LLMConfigService.update_last_used(db, llm_config.config_id)
 
-    # Resume translation in background
-    orchestrator = TranslationOrchestrator(
-        task_id=task.id,
+    # For resume, use the task's original provider/model but potentially updated API key
+    # Build config that preserves task's model but uses resolved API key
+    resume_config = LLMRuntimeConfig(
         provider=task.provider,
         model=task.model,
         api_key=llm_config.api_key,
-        resume=True,
         temperature=llm_config.temperature,
         base_url=llm_config.base_url,
+    )
+
+    # Resume translation in background
+    orchestrator = TranslationOrchestrator(
+        task_id=task.id,
+        llm_config=resume_config,
+        resume=True,
     )
     background_tasks.add_task(orchestrator.run)
 
@@ -431,15 +471,33 @@ async def retranslate_paragraph(
 
     from app.core.translation.pipeline import TranslationPipeline, PipelineConfig
 
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="translation",
+            )
         logger.info(f"Retranslate: resolved LLM config for provider={llm_config.provider}, model={llm_config.model}")
     except ValueError as e:
         logger.error(f"Retranslate: failed to resolve LLM config: {e}")
@@ -517,11 +575,8 @@ async def retranslate_paragraph(
 
     # Create pipeline config and translate
     config = PipelineConfig(
-        provider=llm_config.provider,
-        model=llm_config.model,
-        api_key=llm_config.api_key,
+        llm_config=llm_config,
         mode=translation_mode,
-        temperature=llm_config.temperature,
     )
     pipeline = TranslationPipeline(config)
 
@@ -749,15 +804,33 @@ async def start_conversation(
             created_at=conversation.created_at.isoformat(),
         )
 
-    # Resolve LLM configuration for new conversation
+    # Resolve LLM configuration for new conversation with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="translation",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -857,15 +930,33 @@ async def send_message(
     1. config_id: Reference a stored configuration (recommended)
     2. provider + model + api_key: Direct parameters (for debugging)
     """
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="translation",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1000,15 +1091,33 @@ async def apply_suggestion(
     )
     conversation = result.scalar_one_or_none()
 
-    # Resolve LLM configuration
+    # Resolve LLM configuration with stage-specific defaults
     try:
-        llm_config = await LLMConfigService.resolve_config(
-            db,
-            api_key=request.api_key,
-            model=request.model,
-            provider=request.provider,
-            config_id=request.config_id,
-        )
+        if request.api_key or request.model:
+            # Direct parameters provided - use old service for backward compatibility
+            old_config = await LLMConfigService.resolve_config(
+                db,
+                api_key=request.api_key,
+                model=request.model,
+                provider=request.provider,
+                config_id=request.config_id,
+            )
+            llm_config = LLMRuntimeConfig(
+                provider=old_config.provider,
+                model=old_config.model,
+                api_key=old_config.api_key,
+                base_url=old_config.base_url,
+                temperature=old_config.temperature,
+                config_id=old_config.config_id,
+                config_name=old_config.config_name,
+            )
+        else:
+            # Use new resolver with stage-specific defaults for optimization
+            llm_config = await LLMConfigResolver.resolve(
+                db,
+                config_id=request.config_id,
+                stage="optimization",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -1,6 +1,7 @@
 """Book Analysis Service - Analyze book content for translation context."""
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, AsyncGenerator
@@ -9,16 +10,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from litellm import acompletion
-
 from app.models.database import Project, BookAnalysis, AnalysisTask
 from app.models.database.paragraph import Paragraph
 from app.models.database.chapter import Chapter
 from app.core.prompts.loader import PromptLoader
-from app.core.prompts.variables import VariableService
+from app.core.prompts.variable_builder import build_variables
+from app.core.llm.runtime_config import LLMRuntimeConfig
+from app.core.llm.gateway import UnifiedLLMGateway
 
 if TYPE_CHECKING:
-    from app.core.llm.config_service import ResolvedLLMConfig
+    pass
+
+logger = logging.getLogger(__name__)
 
 
 class BookAnalysisService:
@@ -60,7 +63,7 @@ class BookAnalysisService:
         self,
         db: AsyncSession,
         project_id: str,
-        llm_config: "ResolvedLLMConfig",
+        llm_config: LLMRuntimeConfig,
         sample_count: int = 20,
         custom_system_prompt: Optional[str] = None,
         custom_user_prompt: Optional[str] = None,
@@ -70,7 +73,7 @@ class BookAnalysisService:
         Args:
             db: Database session
             project_id: Project ID
-            llm_config: Resolved LLM configuration
+            llm_config: LLM runtime configuration (temperature, max_tokens flow through)
             sample_count: Number of sample paragraphs to analyze
             custom_system_prompt: Optional custom system prompt
             custom_user_prompt: Optional custom user prompt
@@ -96,23 +99,16 @@ class BookAnalysisService:
         if not sample_paragraphs:
             raise ValueError("No paragraphs found in project")
 
-        # Build variable context using VariableService (includes user-defined variables)
-        variable_context = await VariableService.build_context(db, project_id)
-
         # Build the analysis prompt using PromptLoader
         sample_text = "\n\n".join([p.original_text for p in sample_paragraphs])
 
-        # Merge variable context with analysis-specific variables
-        variables = variable_context.to_flat_dict()
-        variables.update({
-            "title": project.epub_title or project.name,
-            "author": project.epub_author or "Unknown",
-            "sample_paragraphs": sample_text,
-            # Also add flat versions for backwards compatibility
-            "project.title": project.epub_title or project.name,
-            "project.author": project.epub_author or "Unknown",
-            "content.sample_paragraphs": sample_text,
-        })
+        # Use UnifiedVariableBuilder for consistent variable building
+        variables = await build_variables(
+            db,
+            project_id=project_id,
+            stage="analysis",
+            sample_paragraphs=sample_text,
+        )
 
         # Load and render prompts from template files
         if custom_system_prompt or custom_user_prompt:
@@ -128,23 +124,20 @@ class BookAnalysisService:
             system_prompt = rendered["system_prompt"]
             user_prompt = rendered["user_prompt"]
 
-        # Build kwargs for LiteLLM
-        kwargs = {"api_key": llm_config.api_key}
-        if llm_config.base_url:
-            kwargs["api_base"] = llm_config.base_url
+        # Use UnifiedLLMGateway - temperature and max_tokens come from config!
+        logger.info(
+            f"Calling LLM for analysis: model={llm_config.model}, "
+            f"temperature={llm_config.temperature}, max_tokens={llm_config.max_tokens}"
+        )
 
-        response = await acompletion(
-            model=llm_config.get_litellm_model(),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
+        response = await UnifiedLLMGateway.execute(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            config=llm_config,
         )
 
         # Parse the response
-        response_text = response.choices[0].message.content
-        analysis_data = self._parse_analysis_response(response_text)
+        analysis_data = self._parse_analysis_response(response.content)
 
         # Check if analysis already exists
         result = await db.execute(
@@ -185,7 +178,7 @@ class BookAnalysisService:
         self,
         db: AsyncSession,
         project_id: str,
-        llm_config: "ResolvedLLMConfig",
+        llm_config: LLMRuntimeConfig,
         sample_count: int = 20,
         custom_system_prompt: Optional[str] = None,
         custom_user_prompt: Optional[str] = None,
@@ -197,7 +190,7 @@ class BookAnalysisService:
         Args:
             db: Database session
             project_id: Project ID
-            llm_config: Resolved LLM configuration
+            llm_config: LLM runtime configuration (temperature, max_tokens flow through)
             sample_count: Number of sample paragraphs to analyze
             custom_system_prompt: Optional custom system prompt
             custom_user_prompt: Optional custom user prompt
@@ -297,21 +290,15 @@ class BookAnalysisService:
         await db.commit()
         yield {"step": "building_prompt", "progress": 30, "message": "Building analysis prompt..."}
 
-        # Build variable context using VariableService (includes user-defined variables)
-        variable_context = await VariableService.build_context(db, project_id)
-
         sample_text = "\n\n".join([p.original_text for p in sample_paragraphs])
 
-        # Merge variable context with analysis-specific variables
-        variables = variable_context.to_flat_dict()
-        variables.update({
-            "title": project.epub_title or project.name,
-            "author": project.epub_author or "Unknown",
-            "sample_paragraphs": sample_text,
-            "project.title": project.epub_title or project.name,
-            "project.author": project.epub_author or "Unknown",
-            "content.sample_paragraphs": sample_text,
-        })
+        # Use UnifiedVariableBuilder for consistent variable building
+        variables = await build_variables(
+            db,
+            project_id=project_id,
+            stage="analysis",
+            sample_paragraphs=sample_text,
+        )
 
         # Load and render prompts from template files
         if custom_system_prompt or custom_user_prompt:
@@ -343,32 +330,32 @@ class BookAnalysisService:
         await db.commit()
         yield {"step": "analyzing", "progress": 40, "message": f"Calling {llm_config.model}..."}
 
-        kwargs = {"api_key": llm_config.api_key}
-        if llm_config.base_url:
-            kwargs["api_base"] = llm_config.base_url
+        # Use UnifiedLLMGateway streaming - temperature and max_tokens from config!
+        logger.info(
+            f"Calling LLM for analysis (streaming): model={llm_config.model}, "
+            f"temperature={llm_config.temperature}, max_tokens={llm_config.max_tokens}"
+        )
 
         # Use streaming to get incremental updates
         accumulated_text = ""
         try:
-            response = await acompletion(
-                model=llm_config.get_litellm_model(),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                stream=True,
-                **kwargs,
+            # Stream responses from gateway
+            stream_generator = UnifiedLLMGateway.stream(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                config=llm_config,
             )
 
             chunk_count = 0
-            async for chunk in response:
+            async for llm_response in stream_generator:
                 # Check if cancelled every 10 chunks
                 if chunk_count % 10 == 0 and await self._check_task_cancelled(db, task_id):
                     yield {"step": "error", "progress": min(40 + (chunk_count * 2), 85), "message": "Analysis cancelled by user"}
                     return
 
-                if chunk.choices and chunk.choices[0].delta.content:
-                    accumulated_text += chunk.choices[0].delta.content
+                # Process streaming response from UnifiedLLMGateway
+                if not llm_response.is_complete:
+                    accumulated_text += llm_response.content
                     chunk_count += 1
                     # Update progress (40-85%)
                     progress = min(40 + (chunk_count * 2), 85)
@@ -386,6 +373,9 @@ class BookAnalysisService:
                         "message": f"Receiving response... ({len(accumulated_text)} chars)",
                         "partial_content": accumulated_text[-500:] if len(accumulated_text) > 500 else accumulated_text
                     }
+                else:
+                    # Final complete response - use accumulated content
+                    accumulated_text = llm_response.content
 
         except Exception as e:
             # Update task status to failed
@@ -553,7 +543,7 @@ class BookAnalysisService:
         db: AsyncSession,
         project_id: str,
         field: str,
-        llm_config: "ResolvedLLMConfig",
+        llm_config: LLMRuntimeConfig,
     ) -> BookAnalysis:
         """Regenerate a specific field of the analysis.
 
@@ -561,13 +551,14 @@ class BookAnalysisService:
             db: Database session
             project_id: Project ID
             field: Field to regenerate
-            llm_config: Resolved LLM configuration
+            llm_config: LLM runtime configuration
 
         Returns:
             Updated BookAnalysis
         """
         # For now, just re-run the full analysis
         # In the future, we could have field-specific prompts
+        _ = field  # Unused for now
         return await self.analyze_book(db, project_id, llm_config)
 
     async def _get_sample_paragraphs(

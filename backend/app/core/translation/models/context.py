@@ -128,21 +128,35 @@ class BookAnalysisContext(BaseModel):
                 return json.dumps(value, ensure_ascii=False, indent=2)
             return str(value)
 
+
+        # Placeholder values that should be filtered out
+        INVALID_PLACEHOLDERS = {"undefined", "null", "n/a", "none", "tbd", ""}
+
+        def is_valid_translation(value: Any) -> bool:
+            """Check if a translation value is valid (not a placeholder)."""
+            if value is None:
+                return False
+            if not isinstance(value, str):
+                return bool(value)
+            return value.strip().lower() not in INVALID_PLACEHOLDERS
+
         def to_terminology_dict(value: Any) -> Dict[str, str]:
-            """Convert terminology to dict format."""
+            """Convert terminology to dict format, filtering out invalid translations."""
             if value is None:
                 return {}
             if isinstance(value, dict):
-                return value
+                # Filter out invalid translations from existing dict
+                return {k: v for k, v in value.items() if is_valid_translation(v)}
             if isinstance(value, list):
                 # Convert list of term dicts to simple dict
                 result = {}
                 for item in value:
                     if isinstance(item, dict):
-                        # Handle format: {"english_term": "X", "recommended_chinese": "Y"}
+                        # Handle format: {"english_term": "X", "chinese_translation": "Y"}
+                        # Support multiple field name conventions from different analysis prompts
                         en = item.get("english_term") or item.get("english") or item.get("term")
-                        zh = item.get("recommended_chinese") or item.get("chinese") or item.get("translation")
-                        if en and zh:
+                        zh = item.get("chinese_translation") or item.get("recommended_chinese") or item.get("chinese") or item.get("translation")
+                        if en and is_valid_translation(zh):
                             result[en] = zh
                 return result
             return {}

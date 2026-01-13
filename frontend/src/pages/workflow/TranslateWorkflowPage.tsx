@@ -172,23 +172,77 @@ export function TranslateWorkflowPage() {
   const promptPreviewVariables = useMemo(() => {
     const rawAnalysis = analysisData?.raw_analysis as Record<string, unknown> | null
 
+    // Helper to get nested value (supports both flat and nested structures)
+    const getNestedValue = (obj: Record<string, unknown> | null, ...paths: string[]): string => {
+      if (!obj) return ''
+      for (const path of paths) {
+        const keys = path.split('.')
+        let value: unknown = obj
+        for (const key of keys) {
+          if (value && typeof value === 'object' && key in (value as Record<string, unknown>)) {
+            value = (value as Record<string, unknown>)[key]
+          } else {
+            value = undefined
+            break
+          }
+        }
+        if (value && typeof value === 'string') return value
+      }
+      return ''
+    }
+
+    // Extract work_profile (nested structure from reformed-theology schema)
+    const workProfile = rawAnalysis?.work_profile as Record<string, unknown> | undefined
+
+    // Extract values supporting both flat (default schema) and nested (reformed-theology schema)
+    const writingStyle = getNestedValue(rawAnalysis, 'writing_style', 'work_profile.writing_style')
+    const tone = getNestedValue(rawAnalysis, 'tone', 'work_profile.tone')
+    const targetAudience = getNestedValue(rawAnalysis, 'target_audience', 'work_profile.target_audience')
+    const genreConventions = getNestedValue(rawAnalysis, 'genre_conventions', 'work_profile.genre')
+
     // Format key_terminology for display
-    const terminology = rawAnalysis?.key_terminology as Array<{ english_term: string, chinese_translation: string }> | undefined
+    // Support both field names: recommended_chinese (from analysis) and chinese_translation (legacy)
+    const terminology = rawAnalysis?.key_terminology as Array<{
+      english_term: string
+      recommended_chinese?: string
+      chinese_translation?: string
+      fallback_options?: string[]
+      usage_rule?: string
+    }> | undefined
     const terminologyText = terminology
-      ? terminology.map(t => `- ${t.english_term}: ${t.chinese_translation}`).join('\n')
+      ? terminology.map(t => {
+          const chinese = t.recommended_chinese || t.chinese_translation || ''
+          const fallbacks = t.fallback_options?.slice(0, 2).join(', ')
+          let line = `- **${t.english_term}**: ${chinese}`
+          if (fallbacks) line += ` (alt: ${fallbacks})`
+          if (t.usage_rule) line += `\n  - Usage: ${t.usage_rule.slice(0, 100)}${t.usage_rule.length > 100 ? '...' : ''}`
+          return line
+        }).join('\n')
       : ''
 
     // Format translation_principles for display
     const principles = rawAnalysis?.translation_principles as Record<string, unknown> | undefined
-    const priorityOrder = principles?.priority_order as string | undefined || ''
-    const faithfulnessBoundary = principles?.faithfulness_boundary as string | undefined || ''
-    const permissibleAdaptation = principles?.permissible_adaptation as string | undefined || ''
-    const styleConstraints = principles?.style_constraints as string | undefined || ''
-    const redLines = principles?.red_lines as string | undefined || ''
+    const priorityOrder = (principles?.priority_order as string[] | string | undefined)
+      ? (Array.isArray(principles?.priority_order)
+          ? (principles.priority_order as string[]).join(', ')
+          : String(principles?.priority_order))
+      : ''
+    const faithfulnessBoundary = getNestedValue(rawAnalysis,
+      'translation_principles.faithfulness_boundary',
+      'translation_principles.must_be_literal')
+    const permissibleAdaptation = getNestedValue(rawAnalysis,
+      'translation_principles.permissible_adaptation',
+      'translation_principles.allowed_adjustment')
+    const styleConstraints = getNestedValue(rawAnalysis, 'translation_principles.style_constraints')
+    const redLines = getNestedValue(rawAnalysis,
+      'translation_principles.red_lines',
+      'translation_principles.absolute_red_lines')
 
-    // Format custom_guidelines for display
-    const guidelines = rawAnalysis?.custom_guidelines as string[] | undefined
-    const guidelinesText = guidelines ? guidelines.join('\n') : ''
+    // Format custom_guidelines for display (support both custom_guidelines and custom_watchlist)
+    const guidelines = (rawAnalysis?.custom_guidelines || rawAnalysis?.custom_watchlist) as string[] | undefined
+    const guidelinesText = guidelines
+      ? guidelines.map(g => `- ${g}`).join('\n')
+      : ''
 
     return {
       // Project info (namespaced keys)
@@ -198,10 +252,10 @@ export function TranslateWorkflowPage() {
       // Content
       'content.source': '(Source text will be provided during translation)',
       // Derived from analysis
-      'derived.writing_style': (rawAnalysis?.writing_style as string) || '',
-      'derived.tone': (rawAnalysis?.tone as string) || '',
-      'derived.target_audience': (rawAnalysis?.target_audience as string) || '',
-      'derived.genre_conventions': (rawAnalysis?.genre_conventions as string) || '',
+      'derived.writing_style': writingStyle,
+      'derived.tone': tone,
+      'derived.target_audience': targetAudience,
+      'derived.genre_conventions': genreConventions,
       'derived.terminology_table': terminologyText,
       'derived.priority_order': priorityOrder,
       'derived.faithfulness_boundary': faithfulnessBoundary,
@@ -211,11 +265,11 @@ export function TranslateWorkflowPage() {
       'derived.custom_guidelines': guidelinesText,
       // Boolean flags
       'derived.has_analysis': !!rawAnalysis,
-      'derived.has_writing_style': !!(rawAnalysis?.writing_style),
-      'derived.has_tone': !!(rawAnalysis?.tone),
+      'derived.has_writing_style': !!writingStyle,
+      'derived.has_tone': !!tone,
       'derived.has_terminology': !!terminologyText,
-      'derived.has_target_audience': !!(rawAnalysis?.target_audience),
-      'derived.has_genre_conventions': !!(rawAnalysis?.genre_conventions),
+      'derived.has_target_audience': !!targetAudience,
+      'derived.has_genre_conventions': !!genreConventions,
       'derived.has_translation_principles': !!principles,
       'derived.has_custom_guidelines': !!(guidelines && guidelines.length > 0),
       'derived.has_style_constraints': !!styleConstraints,

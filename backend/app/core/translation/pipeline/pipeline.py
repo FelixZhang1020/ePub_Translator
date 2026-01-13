@@ -7,6 +7,8 @@ all pipeline components for end-to-end translation.
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
+from app.core.llm.runtime_config import LLMRuntimeConfig
+
 from ..models.context import ExistingTranslation, TranslationContext, TranslationMode
 from ..models.prompt import PromptBundle
 from ..models.result import TranslationResult
@@ -17,17 +19,40 @@ from .prompt_engine import PromptEngine
 
 @dataclass
 class PipelineConfig:
-    """Configuration for translation pipeline."""
+    """Configuration for translation pipeline.
 
-    provider: str
-    model: str
-    api_key: str
+    Supports two initialization modes:
+    1. New: Pass llm_config (LLMRuntimeConfig) - recommended
+    2. Legacy: Pass provider, model, api_key individually - for backward compatibility
+
+    The llm_config takes precedence if provided.
+    """
+
+    # New way: unified config
+    llm_config: Optional[LLMRuntimeConfig] = None
+
+    # Legacy way: individual params (for backward compatibility)
+    provider: str = ""
+    model: str = ""
+    api_key: str = ""
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    base_url: Optional[str] = None
+
+    # Workflow params
     mode: TranslationMode = TranslationMode.DIRECT
     stream: bool = False
     max_retries: int = 3
-    temperature: Optional[float] = None  # Override default
-    max_tokens: Optional[int] = None  # Override default
-    base_url: Optional[str] = None  # Custom API endpoint (for OpenRouter, Ollama, etc.)
+
+    def __post_init__(self):
+        """Initialize derived fields from llm_config if provided."""
+        if self.llm_config:
+            self.provider = self.llm_config.provider
+            self.model = self.llm_config.model
+            self.api_key = self.llm_config.api_key
+            self.temperature = self.llm_config.temperature
+            self.max_tokens = self.llm_config.max_tokens
+            self.base_url = self.llm_config.base_url
 
 
 class TranslationPipeline:
