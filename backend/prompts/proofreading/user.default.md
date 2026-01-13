@@ -1,5 +1,5 @@
-【原文】
+[Source]
 {{content.source}}
 
-【当前译文】
+[Current translation]
 {{content.target}}

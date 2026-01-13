@@ -1,7 +1,7 @@
-书名：{{project.title | default:"（未指定）"}}
-作者：{{project.author | default:"（未指定）"}}
+Title: {{project.title | default:"(unspecified)"}}
+Author: {{project.author | default:"(unspecified)"}}
 
-以下是书中的样本段落，请据此分析并输出翻译执行规格：
+Below are sample paragraphs from the book. Analyze them and output the translation execution spec:
 
 ---
 

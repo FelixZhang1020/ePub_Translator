@@ -1,10 +1,10 @@
-【原文】
+[Source]
 {{content.source}}
 
-【现有译文】
+[Current translation]
 {{content.target}}
 
 {{#if pipeline.suggested_changes}}
-【修改建议】
+[Suggested changes]
 {{pipeline.suggested_changes}}
 {{/if}}
