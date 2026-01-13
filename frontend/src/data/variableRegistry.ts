@@ -241,6 +241,15 @@ export const VARIABLE_REGISTRY: VariableCategoryInfo[] = [
         stages: ['optimization'],
         example: 'Change wording for better accuracy and flow.',
       },
+      {
+        name: 'feedback',
+        fullName: 'pipeline.feedback',
+        description: 'User feedback for quick recommendation',
+        type: 'string',
+        source: 'quick_recommendation.request',
+        stages: ['optimization'],
+        example: 'This translation sounds too formal, make it more casual.',
+      },
     ],
   },
   {

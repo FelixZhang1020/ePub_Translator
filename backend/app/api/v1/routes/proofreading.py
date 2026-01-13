@@ -390,7 +390,9 @@ async def get_quick_recommendation(
             "source": request.original_text,
             "target": request.current_translation,
         },
-        "feedback": request.feedback,
+        "pipeline": {
+            "feedback": request.feedback,
+        },
     }
 
     # Render prompts
