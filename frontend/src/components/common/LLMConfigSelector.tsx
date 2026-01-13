@@ -13,17 +13,18 @@ interface LLMConfigSelectorProps {
 
 export function LLMConfigSelector({ className = '' }: LLMConfigSelectorProps) {
   const { t } = useTranslation()
-  const { llmConfigs, activeConfigId, setActiveConfig, getActiveConfig } = useSettingsStore()
+  const { llmConfigs, activeConfigId, setActiveConfig, getActiveConfig, isLoading: configsLoading } = useSettingsStore()
   const fontSize = useAppStore((state) => state.fontSize)
   const fontClasses = fontSizeClasses[fontSize]
   const activeConfig = getActiveConfig()
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Fetch models for sorting by price
+  // Fetch models for sorting by price (cache indefinitely - models rarely change)
   const { data: models } = useQuery({
     queryKey: ['models'],
     queryFn: () => api.getModels(),
+    staleTime: Infinity,
   })
 
   // Sort configs using the same logic as SettingsPage
@@ -47,6 +48,16 @@ export function LLMConfigSelector({ className = '' }: LLMConfigSelectorProps) {
     setIsOpen(false)
   }
 
+  // Loading state
+  if (configsLoading) {
+    return (
+      <div className={`flex items-center gap-2 px-2 lg:px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 rounded-lg ${fontClasses.button} ${className}`}>
+        <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin" />
+        <span>{t('common.loading')}</span>
+      </div>
+    )
+  }
+
   // No configs available
   if (llmConfigs.length === 0) {
     return (
@@ -68,12 +79,12 @@ export function LLMConfigSelector({ className = '' }: LLMConfigSelectorProps) {
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-2 lg:px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${fontClasses.button}`}
       >
+        {activeConfig?.isDefault && (
+          <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
+        )}
         <span className="font-medium text-gray-900 dark:text-gray-100">
           {activeConfig?.name || activeConfig?.model || t('settings.selectConfig')}
         </span>
-        {activeConfig?.isDefault && (
-          <Star className="w-3 h-3 text-amber-500 fill-amber-500" />
-        )}
         <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
@@ -92,12 +103,12 @@ export function LLMConfigSelector({ className = '' }: LLMConfigSelectorProps) {
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
+                    {config.isDefault && (
+                      <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
+                    )}
                     <span className="font-medium text-gray-900 dark:text-gray-100 truncate">
                       {config.name}
                     </span>
-                    {config.isDefault && (
-                      <Star className="w-3 h-3 text-amber-500 fill-amber-500 flex-shrink-0" />
-                    )}
                   </div>
                   <div className={`${fontClasses.xs} text-gray-500 dark:text-gray-400 truncate`}>
                     {config.provider} / {config.model} · T:{config.temperature}
