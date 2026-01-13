@@ -1,9 +1,3 @@
-<p align="right">
-  <a href="README.md">
-    <img src="https://img.shields.io/badge/English-Click_Here-orange?style=for-the-badge" alt="English">
-  </a>
-</p>
-
 # ePub Translator
 
 <div align="center">
@@ -16,7 +10,7 @@
 
 <div align="center">
 
-**[License](LICENSE) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)**
+**[English](README.md) · [License](LICENSE) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)**
 
 </div>
 
