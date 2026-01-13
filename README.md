@@ -97,8 +97,11 @@ Open http://localhost:5173 and API docs at http://localhost:8000/docs.
 | `PORT` | Backend port | `8000` |
 | `FRONTEND_PORT` | Port used for CORS allowlist | `5173` |
 | `DATABASE_URL` | Database URL (SQLite by default) | `sqlite+aiosqlite:///./epub_translator.db` |
-| `UPLOAD_DIR` | Directory for uploaded epubs | `./uploads` |
-| `OUTPUT_DIR` | Directory for generated exports | `./outputs` |
+| `UPLOAD_DIR` | Directory for temporary uploads | `data/temp/uploads` |
+| `OUTPUT_DIR` | Directory for temporary outputs | `data/temp/outputs` |
+| `MAX_UPLOAD_SIZE_MB` | Maximum upload file size in MB | `100` |
+| `API_AUTH_TOKEN` | API authentication token (optional) | - |
+| `REQUIRE_AUTH_ALL` | Require auth on all endpoints | `false` |
 | `OPENAI_API_KEY` | OpenAI API key | - |
 | `ANTHROPIC_API_KEY` | Anthropic (Claude) API key | - |
 | `GEMINI_API_KEY` | Google Gemini API key | - |

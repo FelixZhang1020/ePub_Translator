@@ -307,7 +307,8 @@ async def confirm_translation(
             detail="Translation task has not finished all assigned paragraphs."
         )
 
-    if total_paragraphs == 0 and progress < 0.999:
+    # Progress is on 0-100 scale (percentage)
+    if total_paragraphs == 0 and progress < 99.9:
         raise HTTPException(
             status_code=400,
             detail="Translation task is not complete yet."

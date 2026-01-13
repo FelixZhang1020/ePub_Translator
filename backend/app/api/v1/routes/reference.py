@@ -1,6 +1,8 @@
 """Reference EPUB API routes."""
 
+import re
 import shutil
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +18,25 @@ from app.core.epub import EPUBParser
 from app.core.project_storage import ProjectStorage
 
 router = APIRouter()
+
+
+def secure_filename(filename: str) -> str:
+    """Sanitize a filename to prevent path traversal attacks."""
+    filename = Path(filename).name
+    filename = re.sub(r'[^\w\-.]', '_', filename)
+    filename = filename.strip('. ')
+    filename = re.sub(r'[_.]+', lambda m: m.group(0)[0], filename)
+
+    max_length = 200
+    if len(filename) > max_length:
+        name_part = Path(filename).stem[:max_length - 10]
+        ext_part = Path(filename).suffix[:10]
+        filename = f"{name_part}{ext_part}"
+
+    if not filename or filename.startswith('.'):
+        filename = f"reference_{uuid.uuid4().hex[:8]}.epub"
+
+    return filename
 
 
 class ReferenceEPUBResponse(BaseModel):
@@ -96,24 +117,55 @@ async def upload_reference_epub(
 ) -> ReferenceEPUBResponse:
     """Upload a Chinese reference EPUB file."""
     # Validate file type
-    if not file.filename.endswith(".epub"):
+    if not file.filename or not file.filename.lower().endswith(".epub"):
         raise HTTPException(status_code=400, detail="Only EPUB files are allowed")
+
+    # Validate file size
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    if file.size and file.size > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB"
+        )
+
+    # Sanitize filename
+    safe_filename_str = secure_filename(file.filename)
 
     # Ensure uploads directory exists
     uploads_dir = ProjectStorage.get_uploads_dir(project_id)
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save to project-scoped location
+    # Save to project-scoped location with size limit check
     file_path = ProjectStorage.get_reference_epub_path(project_id)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    chunk_size = 1024 * 1024  # 1MB
+    total_read = 0
+    try:
+        with open(file_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_read += len(chunk)
+                if total_read > max_size:
+                    buffer.close()
+                    file_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum size of {settings.max_upload_size_mb}MB"
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
     try:
         reference = await matching_service.upload_reference_epub(
             db=db,
             project_id=project_id,
             file_path=file_path,
-            filename=file.filename,
+            filename=safe_filename_str,
         )
         return ReferenceEPUBResponse(
             id=reference.id,

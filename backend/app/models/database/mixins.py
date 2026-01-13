@@ -7,7 +7,7 @@ class ProgressTrackingMixin:
     Requires the model to have these attributes:
     - completed_paragraphs: int
     - total_paragraphs: int
-    - progress: float
+    - progress: float (0-100 scale, percentage)
     """
 
     completed_paragraphs: int
@@ -15,6 +15,9 @@ class ProgressTrackingMixin:
     progress: float
 
     def update_progress(self) -> None:
-        """Update progress percentage based on completed paragraphs."""
+        """Update progress percentage based on completed paragraphs.
+
+        Progress is stored as a percentage (0-100), not a ratio (0-1).
+        """
         if self.total_paragraphs > 0:
-            self.progress = self.completed_paragraphs / self.total_paragraphs
+            self.progress = (self.completed_paragraphs / self.total_paragraphs) * 100.0

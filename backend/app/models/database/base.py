@@ -26,7 +26,16 @@ async_session_maker = async_sessionmaker(
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables.
+
+    For development, this uses create_all for convenience.
+    For production, use Alembic migrations instead:
+        cd backend
+        alembic upgrade head
+
+    To create a new migration after model changes:
+        alembic revision --autogenerate -m "description"
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

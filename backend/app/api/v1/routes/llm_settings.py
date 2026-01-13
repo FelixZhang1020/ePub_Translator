@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.llm import llm_service, ModelInfo, ProviderInfo
 from app.core.llm.config_service import LLMConfigService, llm_config_service
 from app.models.database import get_db
+from app.api.dependencies import RequireAuth
 
 router = APIRouter()
 
@@ -83,7 +84,7 @@ async def get_provider_models(provider: str) -> list[ModelInfo]:
 
 
 @router.post("/llm/test")
-async def test_connection(request: TestConnectionRequest):
+async def test_connection(request: TestConnectionRequest, _auth: RequireAuth):
     """Test LLM model connection.
 
     Args:
@@ -187,17 +188,20 @@ class LLMConfigResponse(BaseModel):
 
 @router.get("/llm/configurations")
 async def list_llm_configurations(
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
     """List all stored LLM configurations.
 
     Returns configurations without exposing API keys.
+    Requires authentication when API_AUTH_TOKEN is set.
     """
     return await LLMConfigService.list_configs(db, include_api_key=False)
 
 
 @router.get("/llm/configurations/active")
 async def get_active_llm_configuration(
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Get the currently active LLM configuration.
@@ -222,6 +226,7 @@ async def get_active_llm_configuration(
 @router.get("/llm/configurations/{config_id}")
 async def get_llm_configuration(
     config_id: str,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Get a specific LLM configuration by ID."""
@@ -235,6 +240,7 @@ async def get_llm_configuration(
 @router.post("/llm/configurations")
 async def create_llm_configuration(
     request: CreateLLMConfigRequest,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Create a new LLM configuration.
@@ -263,6 +269,7 @@ async def create_llm_configuration(
 async def update_llm_configuration(
     config_id: str,
     request: UpdateLLMConfigRequest,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Update an existing LLM configuration."""
@@ -278,6 +285,7 @@ async def update_llm_configuration(
 @router.delete("/llm/configurations/{config_id}")
 async def delete_llm_configuration(
     config_id: str,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Delete an LLM configuration."""
@@ -291,6 +299,7 @@ async def delete_llm_configuration(
 @router.post("/llm/configurations/{config_id}/activate")
 async def activate_llm_configuration(
     config_id: str,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Set a configuration as the active one."""
@@ -304,6 +313,7 @@ async def activate_llm_configuration(
 @router.post("/llm/configurations/{config_id}/test")
 async def test_llm_configuration(
     config_id: str,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Test an LLM configuration by making a simple API call."""
@@ -340,6 +350,7 @@ class DuplicateLLMConfigRequest(BaseModel):
 async def duplicate_llm_configuration(
     config_id: str,
     request: DuplicateLLMConfigRequest,
+    _auth: RequireAuth,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Duplicate an existing LLM configuration including the API key.

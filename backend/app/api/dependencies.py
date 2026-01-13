@@ -1,21 +1,92 @@
-"""API dependencies for project validation and cleanup.
+"""API dependencies for project validation, cleanup, and authentication.
 
-This module provides self-healing dependencies that automatically clean up
-orphaned database records when project folders are missing.
+This module provides:
+- Self-healing dependencies that automatically clean up orphaned database records
+- Optional API key authentication for network-exposed deployments
 """
 
 import logging
-from typing import Annotated
+import secrets
+from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, Path
+from fastapi import Depends, HTTPException, Path, Header
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.database.base import get_db, async_session_maker
 from app.models.database.project import Project
 from app.core.project_storage import ProjectStorage
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Authentication Dependencies
+# =============================================================================
+
+
+async def verify_api_token(
+    authorization: Annotated[Optional[str], Header()] = None,
+    x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
+) -> bool:
+    """Verify API token for sensitive endpoints.
+
+    Supports two authentication methods:
+    1. Authorization: Bearer <token>
+    2. X-API-Key: <token>
+
+    If API_AUTH_TOKEN is not set in environment, authentication is disabled
+    (for local development).
+
+    Raises:
+        HTTPException: 401 if auth is required but token is invalid/missing
+    """
+    # If no auth token configured, skip authentication (local dev mode)
+    if not settings.api_auth_token:
+        return True
+
+    # Extract token from headers
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    elif x_api_key:
+        token = x_api_key
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Provide Authorization: Bearer <token> or X-API-Key header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Use constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(token, settings.api_auth_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return True
+
+
+async def verify_api_token_if_configured(
+    authorization: Annotated[Optional[str], Header()] = None,
+    x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
+) -> bool:
+    """Verify API token only if require_auth_all is enabled.
+
+    Used for general endpoints that only need auth when full auth mode is on.
+    """
+    if not settings.require_auth_all:
+        return True
+    return await verify_api_token(authorization, x_api_key)
+
+
+# Type aliases for cleaner dependency injection
+RequireAuth = Annotated[bool, Depends(verify_api_token)]
+OptionalAuth = Annotated[bool, Depends(verify_api_token_if_configured)]
 
 
 async def get_validated_project(

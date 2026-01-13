@@ -133,7 +133,7 @@ class TranslationOrchestrator:
                 # Mark task as completed
                 task.status = TaskStatus.COMPLETED.value
                 task.completed_at = datetime.utcnow()
-                task.progress = 1.0
+                task.progress = 100.0  # 0-100 scale
 
                 # Check if ALL chapters in project are translated
                 # Only mark project as completed if every chapter has translations
@@ -254,7 +254,8 @@ class TranslationOrchestrator:
                 if para.latest_translation and para.latest_translation.is_confirmed:
                     logger.info(f"[Orchestrator] Skipping confirmed translation for paragraph {para.id}")
                     task.completed_paragraphs += 1
-                    task.progress = task.completed_paragraphs / task.total_paragraphs
+                    # Progress in 0-100 scale (percentage)
+                    task.progress = (task.completed_paragraphs / task.total_paragraphs) * 100.0
                     await db.commit()
                     continue
 

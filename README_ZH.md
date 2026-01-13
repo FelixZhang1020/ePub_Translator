@@ -97,8 +97,11 @@ cd frontend && npm run dev
 | `PORT` | 后端端口 | `8000` |
 | `FRONTEND_PORT` | 用于生成 CORS 白名单的前端端口 | `5173` |
 | `DATABASE_URL` | 数据库连接串（默认 SQLite） | `sqlite+aiosqlite:///./epub_translator.db` |
-| `UPLOAD_DIR` | 上传 ePub 的存储目录 | `./uploads` |
-| `OUTPUT_DIR` | 导出文件目录 | `./outputs` |
+| `UPLOAD_DIR` | 临时上传目录 | `data/temp/uploads` |
+| `OUTPUT_DIR` | 临时输出目录 | `data/temp/outputs` |
+| `MAX_UPLOAD_SIZE_MB` | 最大上传文件大小（MB） | `100` |
+| `API_AUTH_TOKEN` | API 认证令牌（可选） | - |
+| `REQUIRE_AUTH_ALL` | 对所有端点启用认证 | `false` |
 | `OPENAI_API_KEY` | OpenAI 密钥 | - |
 | `ANTHROPIC_API_KEY` | Anthropic（Claude）密钥 | - |
 | `GEMINI_API_KEY` | Google Gemini 密钥 | - |

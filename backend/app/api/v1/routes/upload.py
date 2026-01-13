@@ -1,7 +1,9 @@
 """Upload API routes."""
 
 import asyncio
+import re
 import shutil
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
@@ -18,10 +20,68 @@ from app.api.dependencies import ValidatedProject
 router = APIRouter()
 
 
+def secure_filename(filename: str) -> str:
+    """Sanitize a filename to prevent path traversal attacks.
+
+    - Removes directory components (path separal)
+    - Removes potentially dangerous characters
+    - Limits length to prevent filesystem issues
+    - Falls back to a UUID if filename becomes empty
+    """
+    # Get only the filename, not any directory components
+    filename = Path(filename).name
+
+    # Remove any characters that aren't alphanumeric, dash, underscore, or dot
+    # Allow Unicode letters for international filenames
+    filename = re.sub(r'[^\w\-.]', '_', filename)
+
+    # Remove leading/trailing dots and spaces
+    filename = filename.strip('. ')
+
+    # Collapse multiple underscores/dots
+    filename = re.sub(r'[_.]+', lambda m: m.group(0)[0], filename)
+
+    # Limit length (preserve extension)
+    max_length = 200
+    if len(filename) > max_length:
+        name_part = Path(filename).stem[:max_length - 10]
+        ext_part = Path(filename).suffix[:10]
+        filename = f"{name_part}{ext_part}"
+
+    # If filename is empty or just an extension, generate a safe name
+    if not filename or filename.startswith('.'):
+        filename = f"upload_{uuid.uuid4().hex[:8]}.epub"
+
+    return filename
+
+
 def _save_upload_file(file_obj, dest_path: Path) -> None:
     """Save uploaded file to disk (blocking, run in executor)."""
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file_obj, buffer)
+
+
+def _save_upload_file_with_limit(file_obj, dest_path: Path, max_size: int) -> None:
+    """Save uploaded file with size limit validation.
+
+    Reads the file in chunks and enforces max size during the read.
+    This protects against clients that lie about Content-Length.
+    """
+    chunk_size = 1024 * 1024  # 1MB chunks
+    total_read = 0
+
+    with open(dest_path, "wb") as buffer:
+        while True:
+            chunk = file_obj.read(chunk_size)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > max_size:
+                # Clean up partial file
+                buffer.close()
+                dest_path.unlink(missing_ok=True)
+                raise ValueError(f"File exceeds maximum size of {max_size // (1024*1024)}MB")
+            buffer.write(chunk)
 
 
 def _move_file(src: str, dst: str) -> None:
@@ -41,14 +101,34 @@ async def upload_epub(
 ):
     """Upload an EPUB file and create a new project."""
     # Validate file type
-    if not file.filename.endswith(".epub"):
+    if not file.filename or not file.filename.lower().endswith(".epub"):
         raise HTTPException(status_code=400, detail="Only EPUB files are allowed")
+
+    # Validate file size (check Content-Length header first for early rejection)
+    max_size = settings.max_upload_size_mb * 1024 * 1024  # Convert to bytes
+    if file.size and file.size > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB"
+        )
+
+    # Sanitize filename to prevent path traversal
+    safe_filename = secure_filename(file.filename)
 
     # Save to temporary location first (need project_id for final location)
     # Use run_in_executor to avoid blocking the event loop
-    temp_path = settings.upload_dir / f"temp_{file.filename}"
+    # Include a unique ID to prevent collisions
+    temp_filename = f"temp_{uuid.uuid4().hex[:8]}_{safe_filename}"
+    temp_path = settings.upload_dir / temp_filename
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _save_upload_file, file.file, temp_path)
+
+    # Read and validate actual file size while saving
+    try:
+        await loop.run_in_executor(
+            None, _save_upload_file_with_limit, file.file, temp_path, max_size
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=413, detail=str(e))
 
     try:
         # Parse EPUB with V2 parser (lxml-based)

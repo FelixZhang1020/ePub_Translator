@@ -40,7 +40,7 @@ class ProofreadingSession(Base, ProgressTrackingMixin):
         String(50), default=ProofreadingStatus.PENDING.value
     )
     round_number: Mapped[int] = mapped_column(Integer, default=1)
-    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100 scale (percentage)
     total_paragraphs: Mapped[int] = mapped_column(Integer, default=0)
     completed_paragraphs: Mapped[int] = mapped_column(Integer, default=0)
 

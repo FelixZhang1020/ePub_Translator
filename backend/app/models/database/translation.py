@@ -80,7 +80,7 @@ class TranslationTask(Base, ProgressTrackingMixin):
 
     # Progress tracking
     status: Mapped[str] = mapped_column(String(50), default=TaskStatus.PENDING.value)
-    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100 scale (percentage)
     total_paragraphs: Mapped[int] = mapped_column(Integer, default=0)
     completed_paragraphs: Mapped[int] = mapped_column(Integer, default=0)
     current_chapter_id: Mapped[Optional[str]] = mapped_column(String(36))

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     upload_dir: Path = Path(__file__).parent.parent.parent.parent / "data" / "temp" / "uploads"
     output_dir: Path = Path(__file__).parent.parent.parent.parent / "data" / "temp" / "outputs"
 
+    # Upload limits
+    max_upload_size_mb: int = 100  # Maximum upload size in MB
+
     # Translation settings
     default_chunk_size: int = 500  # tokens
     max_retries: int = 3
@@ -33,6 +36,12 @@ class Settings(BaseSettings):
 
     # CORS - dynamically built based on frontend_port
     cors_origins: list[str] = []
+
+    # Authentication (optional - for network-exposed deployments)
+    # Set API_AUTH_TOKEN to enable authentication on sensitive endpoints
+    api_auth_token: Optional[str] = None
+    # If True, require auth on all endpoints; if False, only on sensitive ones
+    require_auth_all: bool = False
 
     # LLM API Keys (loaded from environment, used by LLMConfigService)
     openai_api_key: Optional[str] = None
