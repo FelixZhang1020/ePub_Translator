@@ -234,9 +234,13 @@ export function AnalysisPage() {
   const handleConfirm = async () => {
     try {
       await handleUpdateAnalysis(true)
-      // Refetch workflow status to ensure ProjectLayout has updated data
+      // Invalidate and refetch workflow status
+      await queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
+      // Wait for the query to actually update before navigation
       await refetchWorkflow()
-      // Navigate immediately after successful confirmation
+      // Small delay to ensure React Query cache has updated
+      await new Promise(resolve => setTimeout(resolve, 100))
+      // Navigate after workflow status is confirmed updated
       navigate(`/project/${projectId}/translate`)
     } catch (error) {
       console.error('Failed to confirm analysis:', error)

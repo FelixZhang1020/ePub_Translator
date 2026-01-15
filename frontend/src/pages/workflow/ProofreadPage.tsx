@@ -311,8 +311,13 @@ export function ProofreadPage() {
     mutationFn: async () => {
       return api.confirmProofreading(projectId!)
     },
-    onSuccess: () => {
-      context?.refetchWorkflow()
+    onSuccess: async () => {
+      // Invalidate and refetch workflow status BEFORE navigation
+      await queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
+      await context?.refetchWorkflow()
+      // Small delay to ensure React Query cache has updated
+      await new Promise(resolve => setTimeout(resolve, 100))
+      // Navigate after workflow status is confirmed updated
       navigate(`/project/${projectId}/export`)
     },
   })

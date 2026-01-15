@@ -444,12 +444,14 @@ export function TranslateWorkflowPage() {
   // Confirm translation mutation
   const confirmTranslationMutation = useMutation({
     mutationFn: () => api.confirmTranslation(projectId!),
-    onSuccess: () => {
-      // Navigate immediately to proofreading stage
+    onSuccess: async () => {
+      // Invalidate and refetch workflow status BEFORE navigation
+      await queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
+      await context?.refetchWorkflow()
+      // Small delay to ensure React Query cache has updated
+      await new Promise(resolve => setTimeout(resolve, 100))
+      // Navigate after workflow status is confirmed updated
       navigate(`/project/${projectId}/proofread`)
-      // Invalidate queries after navigation
-      queryClient.invalidateQueries({ queryKey: ['workflowStatus', projectId] })
-      context?.refetchWorkflow()
     },
   })
 

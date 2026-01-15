@@ -44,6 +44,13 @@ So this project isn’t just a shell; it’s a translation system with a defined
 
 ePub Translator is a full-stack app that analyzes, translates, and proofreads ePub books, then exports bilingual output. It supports multiple LLM providers and reference matching to keep terminology consistent across chapters.
 
+## Demo Videos
+
+| Video | Description |
+|-------|-------------|
+| [Part 1: Upload & Analysis](docs/videos/1.%20ePub%20Translation%20-%20Upload%20%26%20Analysis%20-%20HD.mp4) | Upload an ePub and run book analysis |
+| [Part 2: Process & Export](docs/videos/2.%20ePub%20Translator%20-%20Process%20%26%20Export%20-%20HD.mp4) | Translation workflow and export |
+
 ## Highlights
 
 - **Multi-LLM**: OpenAI, Anthropic Claude, Google Gemini, Alibaba Qwen, DeepSeek, OpenRouter, Ollama

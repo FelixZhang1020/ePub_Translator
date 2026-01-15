@@ -124,7 +124,9 @@ export function PromptTemplateSelector({
   // Handle modal confirm
   const handleModalConfirm = useCallback((systemPrompt?: string, userPrompt?: string) => {
     setIsModalOpen(false)
-    onConfirm?.(systemPrompt, userPrompt)
+    if (onConfirm) {
+      onConfirm(systemPrompt, userPrompt)
+    }
   }, [onConfirm])
 
   // Handle click on the view/edit icon

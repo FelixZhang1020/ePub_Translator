@@ -46,6 +46,13 @@
 
 ePub Translator 是一个全栈应用，自动完成电子书的分析、翻译、校对与双语导出，可按章节跟踪状态，并支持多家大模型。
 
+## 演示视频
+
+| 视频 | 内容 |
+|------|------|
+| [第一部分：上传与分析](docs/videos/1.%20ePub%20Translation%20-%20Upload%20%26%20Analysis%20-%20HD.mp4) | 上传 ePub 并运行书籍分析 |
+| [第二部分：翻译与导出](docs/videos/2.%20ePub%20Translator%20-%20Process%20%26%20Export%20-%20HD.mp4) | 翻译流程与导出操作 |
+
 ## 功能亮点
 
 - **多模型支持**：OpenAI、Anthropic Claude、Google Gemini、阿里通义千问、DeepSeek、OpenRouter、Ollama

@@ -15,6 +15,7 @@ from ..strategies import (
     OptimizationStrategy,
 )
 from app.utils.text import safe_truncate
+from app.core.prompts.loader import PromptLoader
 
 
 class PromptEngine:
@@ -199,12 +200,14 @@ class PromptEngine:
 
     @classmethod
     def _replace_placeholders(cls, template: str, context: TranslationContext) -> str:
-        """Replace common placeholders in custom prompts.
+        """Replace placeholders in custom prompts using full variable system.
 
-        Supported placeholders:
-        - {{source_text}}: The source text to translate
-        - {{target_language}}: Target language code
-        - {{existing_translation}}: Existing translation (if available)
+        Supports all template variables including:
+        - content.source, content.target
+        - project.title, project.author, project.source_language, project.target_language
+        - context.previous_source, context.previous_target, context.next_source
+        - derived.* variables from book analysis
+        - Legacy placeholders for backward compatibility
 
         Args:
             template: Template string with placeholders
@@ -213,17 +216,78 @@ class PromptEngine:
         Returns:
             String with placeholders replaced
         """
-        replacements = {
-            "{{source_text}}": context.source.text,
-            "{{target_language}}": context.target_language,
+        # Build comprehensive variable dictionary
+        variables: Dict[str, Any] = {
+            # Content namespace
+            "content.source": context.source.text,
+            "content.source_text": context.source.text,  # Legacy alias
+            "source_text": context.source.text,  # Legacy alias
+
+            # Project namespace
+            "project.title": context.project.title if context.project else "",
+            "project.author": context.project.author if context.project else "",
+            "project.source_language": context.project.source_language if context.project else "en",
+            "project.target_language": context.target_language,
+            "target_language": context.target_language,  # Legacy alias
+
+            # Meta namespace
+            "meta.word_count": context.source.word_count,
+            "meta.paragraph_index": context.source.paragraph_index or 0,
+            "meta.chapter_index": context.source.chapter_index or 0,
         }
 
+        # Add existing translation if available
         if context.existing:
-            replacements["{{existing_translation}}"] = context.existing.text
+            variables["content.target"] = context.existing.text
+            variables["existing_translation"] = context.existing.text
 
-        result = template
-        for placeholder, value in replacements.items():
-            result = result.replace(placeholder, value)
+        # Add context (previous/next paragraphs) if available
+        if context.adjacent:
+            if context.adjacent.previous_original:
+                variables["context.previous_source"] = context.adjacent.previous_original
+            if context.adjacent.previous_translation:
+                variables["context.previous_target"] = context.adjacent.previous_translation
+            if context.adjacent.next_original:
+                variables["context.next_source"] = context.adjacent.next_original
 
-        return result
+        # Add book analysis derived variables if available
+        if context.book_analysis:
+            analysis = context.book_analysis
+            if analysis.writing_style:
+                variables["derived.writing_style"] = analysis.writing_style
+                variables["derived.has_writing_style"] = True
+            if analysis.tone:
+                variables["derived.tone"] = analysis.tone
+            if analysis.target_audience:
+                variables["derived.target_audience"] = analysis.target_audience
+            if analysis.author_biography:
+                variables["derived.author_biography"] = analysis.author_biography
+                variables["derived.has_author_biography"] = True
+            if analysis.key_terminology:
+                # Format terminology as table from Dict[str, str]
+                terms = analysis.key_terminology
+                if terms:
+                    table_rows = ["| Term | Translation |", "|------|-------------|"]
+                    for src, tgt in list(terms.items())[:20]:  # Limit to 20 terms
+                        table_rows.append(f"| {src} | {tgt} |")
+                    variables["derived.terminology_table"] = "\n".join(table_rows)
+                    variables["derived.has_terminology"] = True
+
+            # Translation principles
+            if analysis.translation_principles:
+                principles = analysis.translation_principles
+                if principles.priority_order:
+                    variables["derived.priority_order"] = ", ".join(principles.priority_order)
+                if principles.faithfulness_boundary:
+                    variables["derived.faithfulness_boundary"] = principles.faithfulness_boundary
+                if principles.permissible_adaptation:
+                    variables["derived.permissible_adaptation"] = principles.permissible_adaptation
+                if principles.style_constraints:
+                    variables["derived.style_constraints"] = principles.style_constraints
+                if principles.red_lines:
+                    variables["derived.red_lines"] = principles.red_lines
+                variables["derived.has_translation_principles"] = True
+
+        # Use PromptLoader.render() for proper template variable substitution
+        return PromptLoader.render(template, variables)
 
