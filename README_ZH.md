@@ -48,10 +48,13 @@ ePub Translator 是一个全栈应用，自动完成电子书的分析、翻译�
 
 ## 演示视频
 
-| 视频 | 内容 |
-|------|------|
-| [第一部分：上传与分析](docs/videos/1.%20ePub%20Translation%20-%20Upload%20%26%20Analysis%20-%20HD.mp4) | 上传 ePub 并运行书籍分析 |
-| [第二部分：翻译与导出](docs/videos/2.%20ePub%20Translator%20-%20Process%20%26%20Export%20-%20HD.mp4) | 翻译流程与导出操作 |
+### 第一部分：上传与分析
+
+<video src="https://github.com/FelixZhang1020/ePub_Translator/raw/main/docs/videos/1.%20ePub%20Translation%20-%20Upload%20%26%20Analysis%20-%20HD.mp4" controls width="100%"></video>
+
+### 第二部分：翻译与导出
+
+<video src="https://github.com/FelixZhang1020/ePub_Translator/raw/main/docs/videos/2.%20ePub%20Translator%20-%20Process%20%26%20Export%20-%20HD.mp4" controls width="100%"></video>
 
 ## 功能亮点
 
